@@ -15,9 +15,6 @@ const RESULT_ALIGNOF = c.result_alignof;
 const STATEMENT_SIZEOF = c.statement_sizeof;
 const STATEMENT_ALIGNOF = c.statement_alignof;
 
-// TODO: remove
-const MAX_RESULT_COLUMNS = 20;
-
 pub fn blob(value: []const u8) Blob {
 	return .{.value = value};
 }
@@ -127,7 +124,7 @@ pub const Conn = struct {
 			if (c.duckdb_query(self.conn.*, sql, result) == DuckDBError) {
 				return .{.err = ResultErr.fromResult(allocator, null, result) };
 			}
-			return .{.ok = Rows.init(allocator, null, result)};
+			return Rows.init(allocator, null, result);
 		}
 
 		const prepare_result = self.prepareZ(sql);
@@ -199,15 +196,10 @@ pub const Rows = struct {
 	row_index: usize = 0,
 
 	// Vector data + validity for the current chunk
-	columns: [MAX_RESULT_COLUMNS]ColumnData = undefined,
-
-	// self.columns[0..self.column_count]
-	// We denormalize this because we need it on each call to next, but it only
-	// changes when we get a new chunk
-	column_slices: []ColumnData = undefined,
+	columns: []ColumnData = undefined,
 
 	// the type of each column, this is loaded once on init
-	column_types: [MAX_RESULT_COLUMNS]c.duckdb_type = undefined,
+	column_types: []c.duckdb_type = undefined,
 
 	const ColumnData = struct {
 		validity: [*c]u64,
@@ -230,42 +222,60 @@ pub const Rows = struct {
 		};
 	};
 
-	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Rows {
+	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Result(Rows) {
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
 
 		if (chunk_count == 0) {
 			// no chunk, we don't need to load everything else
-			return .{
+			return .{.ok = .{
 				.stmt = stmt,
 				.result = result,
 				.chunk_count = 0,
 				.allocator = allocator,
-			};
+			}};
 		}
 
 		const column_count = c.duckdb_column_count(result);
-		std.debug.assert(column_count <= MAX_RESULT_COLUMNS);
 
-		var column_types: [MAX_RESULT_COLUMNS]c.duckdb_type = undefined;
+		const column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
+			return .{.err = ResultErr.fromAllocator(err, .{
+				.stmt = if (stmt != null) stmt.?.stmt else null,
+				.result = result,
+			})};
+		};
+
 		for (0..column_count) |i| {
 			column_types[i] = c.duckdb_column_type(result, i);
 		}
 
-		return .{
+		const columns = allocator.alloc(ColumnData, column_count) catch |err| {
+			return .{.err = ResultErr.fromAllocator(err, .{
+				.stmt = if (stmt != null) stmt.?.stmt else null,
+				.result = result,
+			})};
+		};
+
+		return .{.ok = .{
 			.stmt = stmt,
 			.result = result,
+			.columns = columns,
 			.allocator = allocator,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
 			.column_types = column_types,
-		};
+		}};
 	}
 
 	pub fn deinit(self: Rows) void {
+		const allocator = self.allocator;
+
+		allocator.free(self.columns);
+		allocator.free(self.column_types);
+
 		const result = self.result;
 		c.duckdb_destroy_result(result);
-		self.allocator.free(@ptrCast([*]u8, result)[0..RESULT_SIZEOF]);
+		allocator.free(@ptrCast([*]u8, result)[0..RESULT_SIZEOF]);
 
 		if (self.stmt) |stmt| {
 			stmt.deinit();
@@ -293,7 +303,7 @@ pub const Rows = struct {
 
 		return .{
 			.index = row_index,
-			.columns = self.column_slices,
+			.columns = self.columns,
 		};
 	}
 
@@ -301,7 +311,6 @@ pub const Rows = struct {
 		const result = self.result.*;
 		const chunk_count = self.chunk_count;
 		const column_count = self.column_count;
-
 
 		if (self.chunk) |*chunk| {
 			c.duckdb_destroy_data_chunk(chunk);
@@ -322,8 +331,8 @@ pub const Rows = struct {
 				continue;
 			}
 
-			var columns = &self.columns;
-			const column_types = &self.column_types;
+			var columns = self.columns;
+			const column_types = self.column_types;
 
 			for (0..column_count) |col| {
 				const vector = c.duckdb_data_chunk_get_vector(chunk, col);
@@ -358,7 +367,6 @@ pub const Rows = struct {
 			self.chunk = chunk;
 			self.row_count = row_count;
 			self.chunk_index = chunk_index;
-			self.column_slices = columns[0..column_count];
 
 			return true;
 		}
@@ -547,7 +555,7 @@ pub const Stmt = struct {
 		if (c.duckdb_execute_prepared(stmt.*, result) == DuckDBError) {
 			return .{.err = ResultErr.fromResult(allocator, stmt, result) };
 		}
-		return .{.ok = Rows.init(allocator, self, result)};
+		return Rows.init(allocator, self, result);
 	}
 };
 
@@ -812,10 +820,11 @@ pub const ResultErr = struct {
 
 	const Ownership = struct {
 		stmt: ?*c.duckdb_prepared_statement = null,
+		result: ?*c.duckdb_result = null,
 	};
 
 	fn fromAllocator(err: anyerror, own: Ownership) ResultErr {
-		return .{.err = err, .desc = "OOM", .stmt = own.stmt};
+		return .{.err = err, .desc = "OOM", .stmt = own.stmt, .result = own.result};
 	}
 
 	fn static(err: anyerror, desc: [:0]const u8) ResultErr {
