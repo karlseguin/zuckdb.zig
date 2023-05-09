@@ -13,9 +13,9 @@ pub fn build(b: *std.Build) !void {
 		.target = target,
 		.optimize = optimize,
 	});
-	lib_test.addRPath("lib/duckdb");
-	lib_test.addLibraryPath("lib/duckdb");
-	lib_test.addIncludePath("lib/duckdb/");
+	lib_test.addRPath("lib");
+	lib_test.addLibraryPath("lib");
+	lib_test.addIncludePath("lib/");
 	lib_test.linkSystemLibrary("duckdb");
 
 	const run_test = b.addRunArtifact(lib_test);
