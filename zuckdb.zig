@@ -270,8 +270,11 @@ pub const Rows = struct {
 	pub fn deinit(self: Rows) void {
 		const allocator = self.allocator;
 
-		allocator.free(self.columns);
-		allocator.free(self.column_types);
+		if (self.chunk_count != 0) {
+			// these are only allocated if we have data
+			allocator.free(self.columns);
+			allocator.free(self.column_types);
+		}
 
 		const result = self.result;
 		c.duckdb_destroy_result(result);
@@ -781,7 +784,7 @@ const DBErr = struct {
 	desc: []const u8,
 	c_err: ?[*c]u8 = null,
 
-	fn deinit(self: DBErr) void {
+	pub fn deinit(self: DBErr) void {
 		if (self.c_err) |err| {
 			c.duckdb_free(err);
 		}
@@ -850,7 +853,7 @@ pub const ResultErr = struct {
 		};
 	}
 
-	fn deinit(self: ResultErr) void {
+	pub fn deinit(self: ResultErr) void {
 		if (self.result) |r| {
 			c.duckdb_destroy_result(r);
 			self.allocator.free(@ptrCast([*]u8, r)[0..RESULT_SIZEOF]);
@@ -897,6 +900,22 @@ test "query select ok" {
 
 	const row = (try rows.next()).?;
 	try t.expectEqual(@as(i32, 39213), row.getI32(0).?);
+	try t.expectEqual(@as(?Row, null), try rows.next());
+}
+
+test "query empty" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	var res = conn.queryZ("select 1 where false", .{});
+	defer res.deinit();
+	var rows = switch (res) {
+		.err => unreachable,
+		.ok => |rows| rows,
+	};
 	try t.expectEqual(@as(?Row, null), try rows.next());
 }
 
