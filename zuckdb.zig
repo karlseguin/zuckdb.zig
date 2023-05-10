@@ -106,6 +106,18 @@ pub const Conn = struct {
 		allocator.free(@ptrCast([*]u8, conn)[0..CONN_SIZEOF]);
 	}
 
+	pub fn begin(self: Conn) !void {
+		return self.execZ("begin transaction");
+	}
+
+	pub fn commit(self: Conn) !void {
+		return self.execZ("commit");
+	}
+
+	pub fn rollback(self: Conn) !void {
+		return self.execZ("rollback");
+	}
+
 	pub fn exec(self: Conn, sql: []const u8) !void {
 		const zql = try self.allocator.dupeZ(u8, sql);
 		defer self.allocator.free(zql);
@@ -1137,7 +1149,6 @@ test "binding" {
 
 	{
 		// blob
-
 		var rows = conn.query("select $1", .{blob(&[_]u8{0, 1, 2})}).ok;
 		defer rows.deinit();
 
@@ -1309,6 +1320,37 @@ test "Row: read float" {
 		try t.expectEqual(@as(?f64, null), row.getF64(3));
 
 		try t.expectEqual(@as(?Row, null), try rows.next());
+	}
+}
+
+test "transaction" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		//rollback
+		try conn.execZ("create table t (id int)");
+		try conn.begin();
+		try conn.execZ("insert into t (id) values (1)");
+		try conn.rollback();
+
+		var rows = conn.queryZ("select * from t", .{}).ok;
+		defer rows.deinit();
+		try t.expectEqual(@as(?Row, null), try rows.next());
+	}
+
+	{
+		// commit
+		try conn.begin();
+		try conn.execZ("insert into t (id) values (1)");
+		try conn.commit();
+
+		var rows = conn.queryZ("select * from t", .{}).ok;
+		defer rows.deinit();
+		try t.expectEqual(@as(i32, 1), (try rows.next()).?.getI32(0).?);
 	}
 }
 
