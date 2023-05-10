@@ -106,6 +106,18 @@ pub const Conn = struct {
 		allocator.free(@ptrCast([*]u8, conn)[0..CONN_SIZEOF]);
 	}
 
+	pub fn exec(self: Conn, sql: []const u8) !void {
+		const zql = try self.allocator.dupeZ(u8, sql);
+		defer self.allocator.free(zql);
+		return self.execZ(zql);
+	}
+
+	pub fn execZ(self: Conn, sql: [:0]const u8) !void {
+		if (c.duckdb_query(self.conn.*, sql, null) == DuckDBError) {
+			return error.ExecFailed;
+		}
+	}
+
 	pub fn query(self: Conn, sql: []const u8, values: anytype) Result(Rows) {
 		const zql = self.allocator.dupeZ(u8, sql) catch |err| {
 			return .{.err = ResultErr.fromAllocator(err, .{}) };
@@ -870,6 +882,31 @@ test "DB: open invalid path" {
 	const res = DB.init(t.allocator, "/tmp/zuckdb.zig/doesnotexist").err;
 	defer res.deinit();
 	try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/zuckdb.zig/doesnotexist\": No such file or directory", res.desc);
+}
+
+test "exec error" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	try t.expectError(error.ExecFailed, conn.exec("select from x"));
+}
+
+test "exec success" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	try conn.exec("create table t (id int)");
+	try conn.exec("insert into t (id) values (39)");
+
+	var rows = conn.queryZ("select * from t", .{}).ok;
+	defer rows.deinit();
+	try t.expectEqual(@as(i64, 39), (try rows.next()).?.getI32(0).?);
 }
 
 test "query error" {
