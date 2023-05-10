@@ -15,15 +15,8 @@ const RESULT_ALIGNOF = c.result_alignof;
 const STATEMENT_SIZEOF = c.statement_sizeof;
 const STATEMENT_ALIGNOF = c.statement_alignof;
 
-pub fn blob(value: []const u8) Blob {
-	return .{.value = value};
-}
-
-// a marker type so we can tell if the provided []const u8 should be treated as
-// a text or a blob
-pub const Blob = struct {
-	value: []const u8,
-};
+pub const Date = c.duckdb_date_struct;
+pub const Time = c.duckdb_time_struct;
 
 pub const DB = struct{
 	allocator: Allocator,
@@ -229,7 +222,7 @@ pub const Rows = struct {
 		validity: [*c]u64,
 		data: Data,
 
-		const Data = union(enum) {
+		const Data = union(ParameterType) {
 			i8: [*c]i8,
 			i16: [*c]i16,
 			i32: [*c]i32,
@@ -243,6 +236,13 @@ pub const Rows = struct {
 			f32: [*c]f32,
 			f64: [*c]f64,
 			blob: [*]c.duckdb_string_t,
+			varchar: [*]c.duckdb_string_t,
+			date: [*]c.duckdb_date,
+			time: [*]c.duckdb_time,
+			timestamp: [*]c.duckdb_timestamp,
+			interval: void, // TODO
+			decimal: void, // TODO
+			unknown: void,
 		};
 	};
 
@@ -379,6 +379,9 @@ pub const Rows = struct {
 					c.DUCKDB_TYPE_BOOLEAN => ColumnData.Data{.bool = @ptrCast([*c]bool, data)},
 					c.DUCKDB_TYPE_FLOAT => ColumnData.Data{.f32 = @ptrCast([*c]f32, @alignCast(4, data))},
 					c.DUCKDB_TYPE_DOUBLE => ColumnData.Data{.f64 = @ptrCast([*c]f64, @alignCast(8, data))},
+					c.DUCKDB_TYPE_DATE => ColumnData.Data{.date = @ptrCast([*c]c.duckdb_date, @alignCast(@alignOf(c.duckdb_date), data))},
+					c.DUCKDB_TYPE_TIME => ColumnData.Data{.time = @ptrCast([*c]c.duckdb_time, @alignCast(@alignOf(c.duckdb_time), data))},
+					c.DUCKDB_TYPE_TIMESTAMP => ColumnData.Data{.timestamp = @ptrCast([*c]c.duckdb_timestamp, @alignCast(@alignOf(c.duckdb_timestamp), data))},
 					else => {
 						// TODO: logz
 						return error.UnknownDataType;
@@ -541,6 +544,33 @@ pub const Row = struct {
 		}
 	}
 
+	pub fn getDate(self: Row, col: usize) ?Date {
+		const column = self.columns[col];
+		if (self.isNull(column.validity)) return null;
+		switch (column.data) {
+			.date => |vc| return c.duckdb_from_date(vc[self.index]),
+			else => return null,
+		}
+	}
+
+	pub fn getTime(self: Row, col: usize) ?Time {
+		const column = self.columns[col];
+		if (self.isNull(column.validity)) return null;
+		switch (column.data) {
+			.time => |vc| return c.duckdb_from_time(vc[self.index]),
+			else => return null,
+		}
+	}
+
+	pub fn getTimestamp(self: Row, col: usize) ?i64 {
+		const column = self.columns[col];
+		if (self.isNull(column.validity)) return null;
+		switch (column.data) {
+			.timestamp => |vc| return vc[self.index].micros,
+			else => return null,
+		}
+	}
+
 	fn isNull(self: Row, validity: [*c]u64) bool {
 		const index = self.index;
 		const entry_index = index / 64;
@@ -562,11 +592,9 @@ pub const Stmt = struct {
 	pub fn bind(self: Stmt, values: anytype) Result(void) {
 		const stmt = self.stmt.*;
 		inline for (values, 0..) |value, i| {
-			const res = bindValue(@TypeOf(value), stmt, value, i + 1);
-			switch (res) {
-				.ok => {},
-				.err => return res,
-			}
+			_ = bindValue(@TypeOf(value), stmt, value, i + 1) catch |err| {
+				return .{.err = ResultErr.static(err, "Failed to bind parameter", .{.stmt = self.stmt})};
+			};
 		}
 		return .{.ok = {}};
 	}
@@ -584,13 +612,46 @@ pub const Stmt = struct {
 		}
 		return Rows.init(allocator, self, result);
 	}
+
+	pub fn numberOfParameters(self: Stmt) usize {
+		return c.duckdb_nparams(self.stmt.*);
+	}
+
+	pub fn parameterTypeC(self: Stmt, i: usize) usize {
+		return c.duckdb_param_type(self.stmt.*, i+1);
+	}
+
+	pub fn parameterType(self: Stmt, i: usize) ParameterType {
+		return switch (self.parameterTypeC(i)) {
+			1 => .bool,
+			2 => .i8,
+			3 => .i16,
+			4 => .i32,
+			5 => .i64,
+			6 => .u8,
+			7 => .u16,
+			8 => .u32,
+			9 => .u64,
+			10 => .f32,
+			11 => .f64,
+			12 => .timestamp,
+			13 => .date,
+			14 => .time,
+			15 => .interval,
+			16 => .i128,
+			17 => .varchar,
+			18 => .blob,
+			19 => .decimal,
+			else => .unknown
+		};
+	}
 };
 
-fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype, bind_index: usize) Result(void) {
+fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype, bind_index: usize) !c_uint {
 	var rc: c_uint = 0;
 	switch (@typeInfo(T)) {
 		.Null => rc = c.duckdb_bind_null(stmt, bind_index),
-		.ComptimeInt => rc = c.duckdb_bind_int64(stmt, bind_index, @intCast(i64, value)),
+		.ComptimeInt => rc = bindI64(stmt, bind_index, @intCast(i64, value)),
 		.ComptimeFloat => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(f64, value)),
 		.Int => |int| {
 			if (int.signedness == .signed) {
@@ -598,7 +659,8 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 					1...8 => rc = c.duckdb_bind_int8(stmt, bind_index, @intCast(i8, value)),
 					9...16 => rc = c.duckdb_bind_int16(stmt, bind_index, @intCast(i16, value)),
 					17...32 => rc = c.duckdb_bind_int32(stmt, bind_index, @intCast(i32, value)),
-					33...64 => rc = c.duckdb_bind_int64(stmt, bind_index, @intCast(i64, value)),
+					33...63 => rc = c.duckdb_bind_int64(stmt, bind_index, @intCast(i64, value)),
+					64 => rc = bindI64(stmt, bind_index, value),
 					65...128 => rc = c.duckdb_bind_hugeint(stmt, bind_index, hugeInt(@intCast(i128, value))),
 					else => bindError(T),
 				}
@@ -623,15 +685,9 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 		.Bool => rc = c.duckdb_bind_boolean(stmt, bind_index, value),
 		.Pointer => |ptr| {
 			switch (ptr.size) {
-				.One => {
-					const res = bindValue(ptr.child, stmt, value, bind_index);
-					switch (res) {
-						.ok => rc = c.DuckDBSuccess,
-						.err => return res,
-					}
-				},
+				.One => rc = try bindValue(ptr.child, stmt, value, bind_index),
 				.Slice => switch (ptr.child) {
-					u8 => rc = c.duckdb_bind_varchar_length(stmt, bind_index, value.ptr, value.len),
+					u8 => rc = bindVarcharOrBlob(stmt, bind_index, value.ptr, value.len),
 					else => bindError(T),
 				},
 				else => bindError(T),
@@ -643,19 +699,16 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 		},
 		.Optional => |opt| {
 			if (value) |v| {
-				const res = bindValue(opt.child, stmt, v, bind_index);
-				switch (res) {
-					.ok => rc = c.DuckDBSuccess,
-					.err => return res,
-				}
+				rc = try bindValue(opt.child, stmt, v, bind_index);
 			} else {
 				rc = c.duckdb_bind_null(stmt, bind_index);
 			}
 		},
 		.Struct => {
-			if (T == Blob) {
-				const data = value.value;
-				rc = c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, data), data.len);
+			if (T == Date) {
+				rc = c.duckdb_bind_date(stmt, bind_index, c.duckdb_to_date(value));
+			} else if (T == Time) {
+				rc = c.duckdb_bind_time(stmt, bind_index, c.duckdb_to_time(value));
 			} else {
 				bindError(T);
 			}
@@ -664,14 +717,30 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 	}
 
 	if (rc == DuckDBError) {
-		return .{.err = ResultErr.static(error.Bind, "Failed to bind value")};
+		return error.Bind;
 	}
-	return .{.ok = {}};
+	return rc;
+}
+
+fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_uint {
+	switch (c.duckdb_param_type(stmt, bind_index)) {
+		c.DUCKDB_TYPE_TIMESTAMP => return c.duckdb_bind_timestamp(stmt, bind_index, .{.micros = value}),
+		else => return c.duckdb_bind_int64(stmt, bind_index, value),
+	}
+}
+
+fn bindVarcharOrBlob(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
+	switch (c.duckdb_param_type(stmt, bind_index)) {
+		c.DUCKDB_TYPE_VARCHAR => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
+		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
+		else => return DuckDBError,
+	}
 }
 
 fn bindError(comptime T: type) void {
 	@compileError("cannot bind value of type " ++ @typeName(T));
 }
+
 
 fn hugeInt(value: i128) c.duckdb_hugeint {
 	return .{
@@ -783,6 +852,29 @@ fn poolInitFailCleanup(allocator: Allocator, conns: []Conn, count: usize) void {
 	allocator.free(conns);
 }
 
+const ParameterType = enum {
+	unknown,
+	bool,
+	i8,
+	i16,
+	i32,
+	i64,
+	u8,
+	u16,
+	u32,
+	u64,
+	f32,
+	f64,
+	timestamp,
+	date,
+	time,
+	interval,
+	i128,
+	varchar,
+	blob,
+	decimal
+};
+
 const DBResultTag = enum {
 	ok,
 	err,
@@ -851,11 +943,11 @@ pub const ResultErr = struct {
 	};
 
 	fn fromAllocator(err: anyerror, own: Ownership) ResultErr {
-		return .{.err = err, .desc = "OOM", .stmt = own.stmt, .result = own.result};
+		return static(err, "OOM", own);
 	}
 
-	fn static(err: anyerror, desc: [:0]const u8) ResultErr {
-		return .{.err = err, .desc = desc};
+	fn static(err: anyerror, desc: [:0]const u8, own: Ownership) ResultErr {
+		return .{.err = err, .desc = desc, .stmt = own.stmt, .result = own.result};
 	}
 
 	fn fromStmt(allocator: Allocator, stmt: *c.duckdb_prepared_statement) ResultErr {
@@ -890,7 +982,7 @@ pub const ResultErr = struct {
 };
 
 const t = std.testing;
-test "DB: open invalid path" {
+test "open invalid path" {
 	const res = DB.init(t.allocator, "/tmp/zuckdb.zig/doesnotexist").err;
 	defer res.deinit();
 	try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/zuckdb.zig/doesnotexist\": No such file or directory", res.desc);
@@ -1019,8 +1111,8 @@ test "binding" {
 	{
 		// basic types
 		var rows = conn.query("select $1, $2, $3, $4, $5, $6", .{
-			99, // $1
-			-32.01, // $2
+			99,
+			-32.01,
 			true,
 			false,
 			@as(?i32, null),
@@ -1040,12 +1132,12 @@ test "binding" {
 	{
 		// int basic signed
 		var rows = conn.query("select $1, $2, $3, $4, $5, $6", .{
-			99,  // $1
-			@as(i8, 2), // $4
-			@as(i16, 3), // $5
-			@as(i32, 4), // $6
-			@as(i64, 5), // $7
-			@as(i128, 6) // $8
+			99,
+			@as(i8, 2),
+			@as(i16, 3),
+			@as(i32, 4),
+			@as(i64, 5),
+			@as(i128, 6)
 		}).ok;
 		defer rows.deinit();
 
@@ -1135,25 +1227,48 @@ test "binding" {
 	}
 
 	{
-		// runtime slice
+		// runtime varchar
 		var list = std.ArrayList([]const u8).init(t.allocator);
 		defer list.deinit();
 		try list.append("i love keemun");
 
-		var rows = conn.query("select $1", .{list.items[0]}).ok;
+		var rows = conn.query("select $1::varchar", .{list.items[0]}).ok;
 		defer rows.deinit();
-
 		const row = (try rows.next()).?;
 		try t.expectEqualStrings("i love keemun", row.getVarchar(0).?);
 	}
 
 	{
 		// blob
-		var rows = conn.query("select $1", .{blob(&[_]u8{0, 1, 2})}).ok;
+		var rows = conn.query("select $1", .{&[_]u8{0, 1, 2}}).ok;
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
 		try t.expectEqualStrings(&[_]u8{0, 1, 2}, row.getBlob(0).?);
+	}
+
+	{
+		// runtime blob
+		var list = std.ArrayList([]const u8).init(t.allocator);
+		defer list.deinit();
+		try list.append("i love keemun2");
+
+		var rows = conn.query("select $1::blob", .{list.items[0]}).ok;
+		defer rows.deinit();
+		const row = (try rows.next()).?;
+		try t.expectEqualStrings("i love keemun2", row.getBlob(0).?);
+	}
+
+	{
+		// date & time
+		const date = Date{.year = 2023, .month = 5, .day = 10};
+		const time = Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456};
+		var rows = conn.query("select $1::date, $2::time, $3::timestamp", .{date, time, 751203002000000}).ok;
+		defer rows.deinit();
+		const row = (try rows.next()).?;
+		try t.expectEqual(date, row.getDate(0).?);
+		try t.expectEqual(time, row.getTime(1).?);
+		try t.expectEqual(@as(i64, 751203002000000), row.getTimestamp(2).?);
 	}
 }
 
@@ -1323,6 +1438,24 @@ test "Row: read float" {
 	}
 }
 
+test "Row: read date & time" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		var rows = conn.queryZ("select date '1992-09-20', time '14:21:13.332', timestamp '1993-10-21 11:30:02'", .{}).ok;
+		defer rows.deinit();
+
+		var row = (try rows.next()) orelse unreachable;
+		try t.expectEqual(Date{.year = 1992, .month = 9, .day = 20}, row.getDate(0).?);
+		try t.expectEqual(Time{.hour = 14, .min = 21, .sec = 13, .micros = 332000}, row.getTime(1).?);
+		try t.expectEqual(@as(?i64, 751203002000000), row.getTimestamp(2).?);
+	}
+}
+
 test "transaction" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
@@ -1352,6 +1485,77 @@ test "transaction" {
 		defer rows.deinit();
 		try t.expectEqual(@as(i32, 1), (try rows.next()).?.getI32(0).?);
 	}
+}
+
+test "query parameters" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	const stmt = conn.prepareZ(\\select
+		\\ $1::bool,
+		\\ $2::tinyint, $3::smallint, $4::integer, $5::bigint, $6::hugeint,
+		\\ $7::utinyint, $8::usmallint, $9::uinteger, $10::ubigint,
+		\\ $11::real, $12::double, $13::decimal,
+		\\ $14::timestamp, $15::date, $16::time, $17::interval,
+		\\ $18::varchar, $19::blob
+	).ok;
+
+	defer stmt.deinit();
+
+	try t.expectEqual(@as(usize, 19), stmt.numberOfParameters());
+
+	// bool
+	try t.expectEqual(@as(usize, 1), stmt.parameterTypeC(0));
+	try t.expectEqual(ParameterType.bool, stmt.parameterType(0));
+
+	// int
+	try t.expectEqual(@as(usize, 2), stmt.parameterTypeC(1));
+	try t.expectEqual(ParameterType.i8, stmt.parameterType(1));
+	try t.expectEqual(@as(usize, 3), stmt.parameterTypeC(2));
+	try t.expectEqual(ParameterType.i16, stmt.parameterType(2));
+	try t.expectEqual(@as(usize, 4), stmt.parameterTypeC(3));
+	try t.expectEqual(ParameterType.i32, stmt.parameterType(3));
+	try t.expectEqual(@as(usize, 5), stmt.parameterTypeC(4));
+	try t.expectEqual(ParameterType.i64, stmt.parameterType(4));
+	try t.expectEqual(@as(usize, 16), stmt.parameterTypeC(5));
+	try t.expectEqual(ParameterType.i128, stmt.parameterType(5));
+
+	// uint
+	try t.expectEqual(@as(usize, 6), stmt.parameterTypeC(6));
+	try t.expectEqual(ParameterType.u8, stmt.parameterType(6));
+	try t.expectEqual(@as(usize, 7), stmt.parameterTypeC(7));
+	try t.expectEqual(ParameterType.u16, stmt.parameterType(7));
+	try t.expectEqual(@as(usize, 8), stmt.parameterTypeC(8));
+	try t.expectEqual(ParameterType.u32, stmt.parameterType(8));
+	try t.expectEqual(@as(usize, 9), stmt.parameterTypeC(9));
+	try t.expectEqual(ParameterType.u64, stmt.parameterType(9));
+
+	// float & decimal
+	try t.expectEqual(@as(usize, 10), stmt.parameterTypeC(10));
+	try t.expectEqual(ParameterType.f32, stmt.parameterType(10));
+	try t.expectEqual(@as(usize, 11), stmt.parameterTypeC(11));
+	try t.expectEqual(ParameterType.f64, stmt.parameterType(11));
+	try t.expectEqual(@as(usize, 19), stmt.parameterTypeC(12));
+	try t.expectEqual(ParameterType.decimal, stmt.parameterType(12));
+
+	// time
+	try t.expectEqual(@as(usize, 12), stmt.parameterTypeC(13));
+	try t.expectEqual(ParameterType.timestamp, stmt.parameterType(13));
+	try t.expectEqual(@as(usize, 13), stmt.parameterTypeC(14));
+	try t.expectEqual(ParameterType.date, stmt.parameterType(14));
+	try t.expectEqual(@as(usize, 14), stmt.parameterTypeC(15));
+	try t.expectEqual(ParameterType.time, stmt.parameterType(15));
+	try t.expectEqual(@as(usize, 15), stmt.parameterTypeC(16));
+	try t.expectEqual(ParameterType.interval, stmt.parameterType(16));
+
+	// varchar & blob
+	try t.expectEqual(@as(usize, 17), stmt.parameterTypeC(17));
+	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
+	try t.expectEqual(@as(usize, 18), stmt.parameterTypeC(18));
+	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
 }
 
 test "Pool" {
