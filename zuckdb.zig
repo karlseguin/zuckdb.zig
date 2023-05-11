@@ -242,8 +242,21 @@ pub const Rows = struct {
 			time: [*]c.duckdb_time,
 			timestamp: [*]c.duckdb_timestamp,
 			interval: [*]c.duckdb_interval,
-			decimal: void, // TODO
+			decimal: ColumnData.Decimal,
 			unknown: void,
+		};
+
+		const Decimal = struct {
+			width: u8,
+			scale: u8,
+			internal: Internal,
+
+			const Internal = union(enum) {
+				i16: [*c]i16,
+				i32: [*c]i32,
+				i64: [*c]i64,
+				i128: [*c]i128,
+			};
 		};
 	};
 
@@ -365,6 +378,7 @@ pub const Rows = struct {
 			for (0..column_count) |col| {
 				const vector = c.duckdb_data_chunk_get_vector(chunk, col);
 				const data = c.duckdb_vector_get_data(vector);
+				const logical_type = c.duckdb_vector_get_column_type(vector);
 
 				const typed = switch (column_types[col]) {
 					c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR => ColumnData.Data{.blob = @ptrCast([*]c.duckdb_string_t, @alignCast(8, data))},
@@ -384,6 +398,20 @@ pub const Rows = struct {
 					c.DUCKDB_TYPE_TIME => ColumnData.Data{.time = @ptrCast([*c]c.duckdb_time, @alignCast(@alignOf(c.duckdb_time), data))},
 					c.DUCKDB_TYPE_TIMESTAMP => ColumnData.Data{.timestamp = @ptrCast([*c]c.duckdb_timestamp, @alignCast(@alignOf(c.duckdb_timestamp), data))},
 					c.DUCKDB_TYPE_INTERVAL => ColumnData.Data{.interval = @ptrCast([*c]c.duckdb_interval, @alignCast(@alignOf(c.duckdb_interval), data))},
+					c.DUCKDB_TYPE_DECIMAL => blk: {
+						// decimal's storage is based on the width
+						const scale = c.duckdb_decimal_scale(logical_type);
+						const width = c.duckdb_decimal_width(logical_type);
+						const internal = switch (c.duckdb_decimal_internal_type(logical_type)) {
+							c.DUCKDB_TYPE_SMALLINT => ColumnData.Decimal.Internal{.i16 = @ptrCast([*c]i16, @alignCast(2, data))},
+							c.DUCKDB_TYPE_INTEGER => ColumnData.Decimal.Internal{.i32 = @ptrCast([*c]i32, @alignCast(4, data))},
+							c.DUCKDB_TYPE_BIGINT => ColumnData.Decimal.Internal{.i64 = @ptrCast([*c]i64, @alignCast(8, data))},
+							c.DUCKDB_TYPE_HUGEINT => ColumnData.Decimal.Internal{.i128 = @ptrCast([*c]i128, @alignCast(16, data))},
+							else => unreachable,
+						};
+
+						break: blk ColumnData.Data{.decimal = .{.width = width, .scale = scale, .internal = internal}};
+					},
 					else => {
 						return error.UnknownDataType;
 					}
@@ -581,6 +609,24 @@ pub const Row = struct {
 		}
 	}
 
+	pub fn getDecimal(self: Row, col: usize) ?f64 {
+		const column = self.columns[col];
+		if (self.isNull(column.validity)) return null;
+		switch (column.data) {
+			.decimal => |vc| {
+				const value = switch (vc.internal) {
+					inline else => |internal| hugeInt(internal[self.index]),
+				};
+				return c.duckdb_decimal_to_double(c.duckdb_decimal{
+					.width = vc.width,
+					.scale = vc.scale,
+					.value = value,
+				});
+			},
+			else => return null,
+		}
+	}
+
 	fn isNull(self: Row, validity: [*c]u64) bool {
 		const index = self.index;
 		const entry_index = index / 64;
@@ -753,7 +799,6 @@ fn bindError(comptime T: type) void {
 	@compileError("cannot bind value of type " ++ @typeName(T));
 }
 
-
 fn hugeInt(value: i128) c.duckdb_hugeint {
 	return .{
 		.lower = @intCast(u64, @mod(value, 18446744073709551616)),
@@ -864,7 +909,7 @@ fn poolInitFailCleanup(allocator: Allocator, conns: []Conn, count: usize) void {
 	allocator.free(conns);
 }
 
-const ParameterType = enum {
+pub const ParameterType = enum {
 	unknown,
 	bool,
 	i8,
@@ -1230,6 +1275,19 @@ test "binding" {
 	}
 
 	{
+		// decimal
+		var rows = conn.query("select $1::decimal(3,2), $2::decimal(18,6)", .{
+			1.23, // $1
+			-0.3291484 // $2
+		}).ok;
+		defer rows.deinit();
+
+		const row = (try rows.next()).?;
+		try t.expectEqual(@as(f64, 1.23), row.getDecimal(0).?);
+		try t.expectEqual(@as(f64, -0.329148), row.getDecimal(1).?);
+	}
+
+	{
 		// text
 		var rows = conn.query("select $1", .{"hello world",}).ok;
 		defer rows.deinit();
@@ -1449,6 +1507,27 @@ test "Row: read float" {
 		try t.expectEqual(@as(?f64, null), row.getF64(3));
 
 		try t.expectEqual(@as(?Row, null), try rows.next());
+	}
+}
+
+test "Row: read decimal" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		// decimals (representation is different based on the width)
+		var rows = conn.query("select 1.23::decimal(3,2), 1.24::decimal(8, 4), 1.25::decimal(12, 5), 1.26::decimal(18, 3), 1.27::decimal(35, 4)", .{}).ok;
+		defer rows.deinit();
+
+		const row = (try rows.next()).?;
+		try t.expectEqual(@as(f64, 1.23), row.getDecimal(0).?);
+		try t.expectEqual(@as(f64, 1.24), row.getDecimal(1).?);
+		try t.expectEqual(@as(f64, 1.25), row.getDecimal(2).?);
+		try t.expectEqual(@as(f64, 1.26), row.getDecimal(3).?);
+		try t.expectEqual(@as(f64, 1.27), row.getDecimal(4).?);
 	}
 }
 
