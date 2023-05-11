@@ -17,6 +17,7 @@ const STATEMENT_ALIGNOF = c.statement_alignof;
 
 pub const Date = c.duckdb_date_struct;
 pub const Time = c.duckdb_time_struct;
+pub const Interval = c.duckdb_interval;
 
 pub const DB = struct{
 	allocator: Allocator,
@@ -240,7 +241,7 @@ pub const Rows = struct {
 			date: [*]c.duckdb_date,
 			time: [*]c.duckdb_time,
 			timestamp: [*]c.duckdb_timestamp,
-			interval: void, // TODO
+			interval: [*]c.duckdb_interval,
 			decimal: void, // TODO
 			unknown: void,
 		};
@@ -382,8 +383,8 @@ pub const Rows = struct {
 					c.DUCKDB_TYPE_DATE => ColumnData.Data{.date = @ptrCast([*c]c.duckdb_date, @alignCast(@alignOf(c.duckdb_date), data))},
 					c.DUCKDB_TYPE_TIME => ColumnData.Data{.time = @ptrCast([*c]c.duckdb_time, @alignCast(@alignOf(c.duckdb_time), data))},
 					c.DUCKDB_TYPE_TIMESTAMP => ColumnData.Data{.timestamp = @ptrCast([*c]c.duckdb_timestamp, @alignCast(@alignOf(c.duckdb_timestamp), data))},
+					c.DUCKDB_TYPE_INTERVAL => ColumnData.Data{.interval = @ptrCast([*c]c.duckdb_interval, @alignCast(@alignOf(c.duckdb_interval), data))},
 					else => {
-						// TODO: logz
 						return error.UnknownDataType;
 					}
 				};
@@ -571,6 +572,15 @@ pub const Row = struct {
 		}
 	}
 
+	pub fn getInterval(self: Row, col: usize) ?Interval {
+		const column = self.columns[col];
+		if (self.isNull(column.validity)) return null;
+		switch (column.data) {
+			.interval => |vc| return vc[self.index],
+			else => return null,
+		}
+	}
+
 	fn isNull(self: Row, validity: [*c]u64) bool {
 		const index = self.index;
 		const entry_index = index / 64;
@@ -709,6 +719,8 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 				rc = c.duckdb_bind_date(stmt, bind_index, c.duckdb_to_date(value));
 			} else if (T == Time) {
 				rc = c.duckdb_bind_time(stmt, bind_index, c.duckdb_to_time(value));
+			} else if (T == Interval) {
+				rc = c.duckdb_bind_interval(stmt, bind_index, value);
 			} else {
 				bindError(T);
 			}
@@ -1205,7 +1217,7 @@ test "binding" {
 	{
 		// floats
 		var rows = conn.query("select $1, $2, $3", .{
-			99.88,  // $1
+			99.88, // $1
 			@as(f32, -3.192), // $2
 			@as(f64, 999.182), // $3
 		}).ok;
@@ -1263,12 +1275,14 @@ test "binding" {
 		// date & time
 		const date = Date{.year = 2023, .month = 5, .day = 10};
 		const time = Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456};
-		var rows = conn.query("select $1::date, $2::time, $3::timestamp", .{date, time, 751203002000000}).ok;
+		const interval = Interval{.months = 3, .days = 7, .micros = 982810};
+		var rows = conn.query("select $1::date, $2::time, $3::timestamp, $4::interval", .{date, time, 751203002000000, interval}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqual(date, row.getDate(0).?);
 		try t.expectEqual(time, row.getTime(1).?);
 		try t.expectEqual(@as(i64, 751203002000000), row.getTimestamp(2).?);
+		try t.expectEqual(interval, row.getInterval(3).?);
 	}
 }
 
