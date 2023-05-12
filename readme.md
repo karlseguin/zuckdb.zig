@@ -18,8 +18,9 @@ defer conn.deinit();
 }
 
 {
-    // queryZ takes a null terminated string and supports paremeters. Instead
-    // of an error union it returns a tagged-union result with `ok` and `err`.
+    // queryZ takes a null terminated string and supports parameters. Instead
+    // of an error union it returns a tagged-union with `ok` and `err`.
+    // deinit must be called on both the success (ok) and error (err) return value
     // query is the same but takes a []const u8
     const rows = switch (conn.queryZ("insert into users (id) values ($1)", .{1})) {
         ok => |rows| rows,
@@ -38,16 +39,17 @@ defer conn.deinit();
 
 
 {
-    const rows = switch (conn.query("select * from users", .{})) {
+    const result = conn.query("select * from users", .{});
+    // deinit can also be called on the result itself, rather than
+    // on the ok/err value.
+    defer result.deinit();
+    const rows = switch (result) {
         ok => |rows| rows,
         err => |err| => {
-            // Important to note that even the error needs to be deinit'd
-            defer err.deinit();
             std.debug.print("failed to select: {s}\n", .{err.desc});
             return error.Failure;
         },
     }
-    defer rows.deinit();
     while (rows.next()) |row| {
         // get the 0th column of the current row
         const id = row.get(i32, 0);
