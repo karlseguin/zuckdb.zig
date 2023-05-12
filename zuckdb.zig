@@ -93,9 +93,10 @@ pub const Conn = struct {
 		};
 	}
 
-	pub fn deinit(self: *Conn) void {
-		const allocator = self.allocator;
+	pub fn deinit(self: Conn) void {
 		const conn = self.conn;
+		const allocator = self.allocator;
+
 		c.duckdb_disconnect(conn);
 		allocator.free(@ptrCast([*]u8, conn)[0..CONN_SIZEOF]);
 	}
@@ -282,11 +283,11 @@ pub const Rows = struct {
 		}
 	}
 
-	pub fn rowsChanged(self: Rows) usize {
+	pub fn changed(self: Rows) usize {
 		return c.duckdb_rows_changed(self.result);
 	}
 
-	pub fn rowCount(self: Rows) usize {
+	pub fn count(self: Rows) usize {
 		return c.duckdb_row_count(self.result);
 	}
 
@@ -1125,7 +1126,7 @@ test "exec error" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	try t.expectError(error.ExecFailed, conn.exec("select from x"));
@@ -1135,7 +1136,7 @@ test "exec success" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	try conn.exec("create table t (id int)");
@@ -1150,7 +1151,7 @@ test "query error" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	const err = conn.queryZ("select from x", .{}).err;
@@ -1162,7 +1163,7 @@ test "query select ok" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	var res = conn.queryZ("select 39213", .{});
@@ -1181,7 +1182,7 @@ test "query empty" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	var res = conn.queryZ("select 1 where false", .{});
@@ -1197,22 +1198,22 @@ test "query mutate ok" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
 		const rows = conn.query("create table test(id integer);", .{}).ok;
 		defer rows.deinit();
-		try t.expectEqual(@as(usize, 0), rows.rowCount());
-		try t.expectEqual(@as(usize, 0), rows.rowsChanged());
+		try t.expectEqual(@as(usize, 0), rows.count());
+		try t.expectEqual(@as(usize, 0), rows.changed());
 	}
 
 	{
 		const rows = conn.queryZ("insert into test (id) values (9001);", .{}).ok;
 		defer rows.deinit();
 
-		try t.expectEqual(@as(usize, 1), rows.rowCount());
-		try t.expectEqual(@as(usize, 1), rows.rowsChanged());
+		try t.expectEqual(@as(usize, 1), rows.count());
+		try t.expectEqual(@as(usize, 1), rows.changed());
 	}
 }
 
@@ -1220,7 +1221,7 @@ test "prepare error" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	const stmt = conn.prepare("select x");
@@ -1238,7 +1239,7 @@ test "binding" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1426,7 +1427,7 @@ test "read varchar" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1462,7 +1463,7 @@ test "Row: read blob" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1486,7 +1487,7 @@ test "Row: read ints" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1549,7 +1550,7 @@ test "Row: read bool" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1569,7 +1570,7 @@ test "Row: read float" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1590,7 +1591,7 @@ test "Row: read decimal" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1611,7 +1612,7 @@ test "Row: read date & time" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1629,7 +1630,7 @@ test "Row: list" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1652,7 +1653,7 @@ test "transaction" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	{
@@ -1683,7 +1684,7 @@ test "query parameters" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
 
-	var conn = try db.conn();
+	const conn = try db.conn();
 	defer conn.deinit();
 
 	const stmt = conn.prepareZ(\\select
@@ -1769,7 +1770,7 @@ test "Pool" {
 
 	const result = c1.queryZ("delete from pool_test", .{});
 	defer result.deinit();
-	try t.expectEqual(@as(usize, 3000), result.ok.rowsChanged());
+	try t.expectEqual(@as(usize, 3000), result.ok.changed());
 }
 
 fn testPool(p: *Pool) void {
