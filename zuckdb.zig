@@ -486,7 +486,7 @@ pub const Row = struct {
 	index: usize,
 	columns: []ColumnData,
 
-	pub fn get(self: Row, comptime T: type, col: usize) ?T {
+	pub fn get(self: Row, comptime T: type, col: usize) ?scalarReturn(T) {
 		const index = self.index;
 		const column = self.columns[col];
 		if (isNull(column.validity, index)) return null;
@@ -520,9 +520,16 @@ fn isNull(validity: [*c]u64, index: usize) bool {
 	return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
 }
 
-fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize) ?T {
+fn scalarReturn(comptime T: type) type {
+	return switch (T) {
+		[]u8 => []const u8,
+		else => T
+	};
+}
+
+fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize) ?scalarReturn(T) {
 	switch (T) {
-		[]const u8 => return getBlob(scalar, index),
+		[]u8, []const u8 => return getBlob(scalar, index),
 		i8 => return getI8(scalar, index),
 		i16 => return getI16(scalar, index),
 		i32 => return getI32(scalar, index),
@@ -1362,7 +1369,7 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("hello world", row.get([]const u8, 0).?);
+		try t.expectEqualStrings("hello world", row.get([]u8, 0).?);
 	}
 
 	{
