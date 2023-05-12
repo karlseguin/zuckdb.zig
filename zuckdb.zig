@@ -219,47 +219,6 @@ pub const Rows = struct {
 	// the type of each column, this is loaded once on init
 	column_types: []c.duckdb_type = undefined,
 
-	const ColumnData = struct {
-		validity: [*c]u64,
-		data: Data,
-
-		const Data = union(ParameterType) {
-			i8: [*c]i8,
-			i16: [*c]i16,
-			i32: [*c]i32,
-			i64: [*c]i64,
-			i128: [*c]i128,
-			u8: [*c]u8,
-			u16: [*c]u16,
-			u32: [*c]u32,
-			u64: [*c]u64,
-			bool: [*c]bool,
-			f32: [*c]f32,
-			f64: [*c]f64,
-			blob: [*]c.duckdb_string_t,
-			varchar: [*]c.duckdb_string_t,
-			date: [*]c.duckdb_date,
-			time: [*]c.duckdb_time,
-			timestamp: [*]c.duckdb_timestamp,
-			interval: [*]c.duckdb_interval,
-			decimal: ColumnData.Decimal,
-			unknown: void,
-		};
-
-		const Decimal = struct {
-			width: u8,
-			scale: u8,
-			internal: Internal,
-
-			const Internal = union(enum) {
-				i16: [*c]i16,
-				i32: [*c]i32,
-				i64: [*c]i64,
-				i128: [*c]i128,
-			};
-		};
-	};
-
 	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Result(Rows) {
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
@@ -376,49 +335,24 @@ pub const Rows = struct {
 			const column_types = self.column_types;
 
 			for (0..column_count) |col| {
+				const column_type = column_types[col];
 				const vector = c.duckdb_data_chunk_get_vector(chunk, col);
-				const data = c.duckdb_vector_get_data(vector);
-				const logical_type = c.duckdb_vector_get_column_type(vector);
 
-				const typed = switch (column_types[col]) {
-					c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR => ColumnData.Data{.blob = @ptrCast([*]c.duckdb_string_t, @alignCast(8, data))},
-					c.DUCKDB_TYPE_TINYINT => ColumnData.Data{.i8 = @ptrCast([*c]i8, data)},
-					c.DUCKDB_TYPE_SMALLINT => ColumnData.Data{.i16 = @ptrCast([*c]i16, @alignCast(2, data))},
-					c.DUCKDB_TYPE_INTEGER => ColumnData.Data{.i32 = @ptrCast([*c]i32, @alignCast(4, data))},
-					c.DUCKDB_TYPE_BIGINT => ColumnData.Data{.i64 = @ptrCast([*c]i64, @alignCast(8, data))},
-					c.DUCKDB_TYPE_HUGEINT => ColumnData.Data{.i128 = @ptrCast([*c]i128, @alignCast(16, data))},
-					c.DUCKDB_TYPE_UTINYINT => ColumnData.Data{.u8 = @ptrCast([*c]u8, data)},
-					c.DUCKDB_TYPE_USMALLINT => ColumnData.Data{.u16 = @ptrCast([*c]u16, @alignCast(2, data))},
-					c.DUCKDB_TYPE_UINTEGER => ColumnData.Data{.u32 = @ptrCast([*c]u32, @alignCast(4, data))},
-					c.DUCKDB_TYPE_UBIGINT => ColumnData.Data{.u64 = @ptrCast([*c]u64, @alignCast(8, data))},
-					c.DUCKDB_TYPE_BOOLEAN => ColumnData.Data{.bool = @ptrCast([*c]bool, data)},
-					c.DUCKDB_TYPE_FLOAT => ColumnData.Data{.f32 = @ptrCast([*c]f32, @alignCast(4, data))},
-					c.DUCKDB_TYPE_DOUBLE => ColumnData.Data{.f64 = @ptrCast([*c]f64, @alignCast(8, data))},
-					c.DUCKDB_TYPE_DATE => ColumnData.Data{.date = @ptrCast([*c]c.duckdb_date, @alignCast(@alignOf(c.duckdb_date), data))},
-					c.DUCKDB_TYPE_TIME => ColumnData.Data{.time = @ptrCast([*c]c.duckdb_time, @alignCast(@alignOf(c.duckdb_time), data))},
-					c.DUCKDB_TYPE_TIMESTAMP => ColumnData.Data{.timestamp = @ptrCast([*c]c.duckdb_timestamp, @alignCast(@alignOf(c.duckdb_timestamp), data))},
-					c.DUCKDB_TYPE_INTERVAL => ColumnData.Data{.interval = @ptrCast([*c]c.duckdb_interval, @alignCast(@alignOf(c.duckdb_interval), data))},
-					c.DUCKDB_TYPE_DECIMAL => blk: {
-						// decimal's storage is based on the width
-						const scale = c.duckdb_decimal_scale(logical_type);
-						const width = c.duckdb_decimal_width(logical_type);
-						const internal = switch (c.duckdb_decimal_internal_type(logical_type)) {
-							c.DUCKDB_TYPE_SMALLINT => ColumnData.Decimal.Internal{.i16 = @ptrCast([*c]i16, @alignCast(2, data))},
-							c.DUCKDB_TYPE_INTEGER => ColumnData.Decimal.Internal{.i32 = @ptrCast([*c]i32, @alignCast(4, data))},
-							c.DUCKDB_TYPE_BIGINT => ColumnData.Decimal.Internal{.i64 = @ptrCast([*c]i64, @alignCast(8, data))},
-							c.DUCKDB_TYPE_HUGEINT => ColumnData.Decimal.Internal{.i128 = @ptrCast([*c]i128, @alignCast(16, data))},
-							else => unreachable,
-						};
-
-						break: blk ColumnData.Data{.decimal = .{.width = width, .scale = scale, .internal = internal}};
-					},
-					else => {
+				// we split up Scalar and Complex because, for now atleast, our container types
+				// (like lists) can only contain scalar types. So we need an explicit function
+				// for loading Scalar data which we can re-use for lists.
+				var data: ColumnData.Data = undefined;
+				if (generateScalarColumnData(vector, column_type)) |scalar| {
+					data = .{.scalar = scalar};
+				} else {
+					if (generateContainerColumnData(vector, column_type)) |container| {
+						data = .{.container = container};
+					} else {
 						return error.UnknownDataType;
 					}
-				};
-
+				}
 				columns[col] = ColumnData{
-					.data = typed,
+					.data = data,
 					.validity = c.duckdb_vector_get_validity(vector),
 				};
 			}
@@ -433,207 +367,342 @@ pub const Rows = struct {
 	}
 };
 
+// DuckDB exposes data as "vectors", which is essentially a pointer to memory
+// that holds data based on the column type (a vector is data for a column, not
+// a row). Our ColumnData is a typed wrapper to the (a) data and (b) the validity
+// mask (null) of a vector.
+const ColumnData = struct {
+	data: Data,
+	validity: [*c]u64,
+
+	const Data = union(enum) {
+		scalar: Scalar,
+		container: Container,
+	};
+
+	const Scalar = union(enum) {
+		i8: [*c]i8,
+		i16: [*c]i16,
+		i32: [*c]i32,
+		i64: [*c]i64,
+		i128: [*c]i128,
+		u8: [*c]u8,
+		u16: [*c]u16,
+		u32: [*c]u32,
+		u64: [*c]u64,
+		bool: [*c]bool,
+		f32: [*c]f32,
+		f64: [*c]f64,
+		blob: [*]c.duckdb_string_t,
+		varchar: [*]c.duckdb_string_t,
+		date: [*]c.duckdb_date,
+		time: [*]c.duckdb_time,
+		timestamp: [*]c.duckdb_timestamp,
+		interval: [*]c.duckdb_interval,
+		decimal: ColumnData.Decimal,
+	};
+
+	const Container = union(enum) {
+		list: ColumnData.List,
+	};
+
+	const Decimal = struct {
+		width: u8,
+		scale: u8,
+		internal: Internal,
+
+		const Internal = union(enum) {
+			i16: [*c]i16,
+			i32: [*c]i32,
+			i64: [*c]i64,
+			i128: [*c]i128,
+		};
+	};
+
+	const List = struct {
+		child: Scalar,
+		validity: [*c]u64,
+		entries: [*]c.duckdb_list_entry,
+	};
+};
+
+fn generateScalarColumnData(vector: c.duckdb_vector, column_type: usize) ?ColumnData.Scalar {
+	const raw_data = c.duckdb_vector_get_data(vector);
+	switch (column_type) {
+		c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR => return .{.blob = @ptrCast([*]c.duckdb_string_t, @alignCast(8, raw_data))},
+		c.DUCKDB_TYPE_TINYINT => return .{.i8 = @ptrCast([*c]i8, raw_data)},
+		c.DUCKDB_TYPE_SMALLINT => return .{.i16 = @ptrCast([*c]i16, @alignCast(2, raw_data))},
+		c.DUCKDB_TYPE_INTEGER => return .{.i32 = @ptrCast([*c]i32, @alignCast(4, raw_data))},
+		c.DUCKDB_TYPE_BIGINT => return .{.i64 = @ptrCast([*c]i64, @alignCast(8, raw_data))},
+		c.DUCKDB_TYPE_HUGEINT => return .{.i128 = @ptrCast([*c]i128, @alignCast(16, raw_data))},
+		c.DUCKDB_TYPE_UTINYINT => return .{.u8 = @ptrCast([*c]u8, raw_data)},
+		c.DUCKDB_TYPE_USMALLINT => return .{.u16 = @ptrCast([*c]u16, @alignCast(2, raw_data))},
+		c.DUCKDB_TYPE_UINTEGER => return .{.u32 = @ptrCast([*c]u32, @alignCast(4, raw_data))},
+		c.DUCKDB_TYPE_UBIGINT => return .{.u64 = @ptrCast([*c]u64, @alignCast(8, raw_data))},
+		c.DUCKDB_TYPE_BOOLEAN => return .{.bool = @ptrCast([*c]bool, raw_data)},
+		c.DUCKDB_TYPE_FLOAT => return .{.f32 = @ptrCast([*c]f32, @alignCast(4, raw_data))},
+		c.DUCKDB_TYPE_DOUBLE => return .{.f64 = @ptrCast([*c]f64, @alignCast(8, raw_data))},
+		c.DUCKDB_TYPE_DATE => return .{.date = @ptrCast([*c]c.duckdb_date, @alignCast(@alignOf(c.duckdb_date), raw_data))},
+		c.DUCKDB_TYPE_TIME => return .{.time = @ptrCast([*c]c.duckdb_time, @alignCast(@alignOf(c.duckdb_time), raw_data))},
+		c.DUCKDB_TYPE_TIMESTAMP => return .{.timestamp = @ptrCast([*c]c.duckdb_timestamp, @alignCast(@alignOf(c.duckdb_timestamp), raw_data))},
+		c.DUCKDB_TYPE_INTERVAL => return .{.interval = @ptrCast([*c]c.duckdb_interval, @alignCast(@alignOf(c.duckdb_interval), raw_data))},
+		c.DUCKDB_TYPE_DECIMAL => {
+			// decimal's storage is based on the width
+			const logical_type = c.duckdb_vector_get_column_type(vector);
+			const scale = c.duckdb_decimal_scale(logical_type);
+			const width = c.duckdb_decimal_width(logical_type);
+			const internal: ColumnData.Decimal.Internal = switch (c.duckdb_decimal_internal_type(logical_type)) {
+				c.DUCKDB_TYPE_SMALLINT => .{.i16 = @ptrCast([*c]i16, @alignCast(2, raw_data))},
+				c.DUCKDB_TYPE_INTEGER => .{.i32 = @ptrCast([*c]i32, @alignCast(4, raw_data))},
+				c.DUCKDB_TYPE_BIGINT => .{.i64 = @ptrCast([*c]i64, @alignCast(8, raw_data))},
+				c.DUCKDB_TYPE_HUGEINT => .{.i128 = @ptrCast([*c]i128, @alignCast(16, raw_data))},
+				else => unreachable,
+			};
+			return .{.decimal = .{.width = width, .scale = scale, .internal = internal}};
+		},
+		else => return null,
+	}
+}
+
+fn generateContainerColumnData(vector: c.duckdb_vector, column_type: usize) ?ColumnData.Container {
+	const raw_data = c.duckdb_vector_get_data(vector);
+	switch (column_type) {
+		c.DUCKDB_TYPE_LIST => {
+			const child_vector = c.duckdb_list_vector_get_child(vector);
+			const child_type = c.duckdb_get_type_id(c.duckdb_vector_get_column_type(child_vector));
+			const child_data = generateScalarColumnData(child_vector, child_type) orelse return null;
+			const child_validity = c.duckdb_vector_get_validity(child_vector);
+			return .{.list = .{
+				.child = child_data,
+				.validity = child_validity,
+				.entries = @ptrCast([*c]c.duckdb_list_entry, @alignCast(@alignOf(c.duckdb_list_entry), raw_data)),
+			}};
+		},
+		else => return null,
+	}
+}
+
 pub const Row = struct {
 	index: usize,
-	// rows: *Rows,
-	columns: []Rows.ColumnData,
+	columns: []ColumnData,
 
-	pub fn getVarchar(self: Row, col: usize) ?[]const u8 {
-		return self.getBlob(col);
-	}
-
-	pub fn getBlob(self: Row, col: usize) ?[]const u8 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-
-		switch (column.data) {
-			.blob => |vc| {
-				// This sucks. This is an untagged union. But both versions (inlined and pointer)
-				// have the same leading 8 bytes, including the length which is the first 4 bytes.
-				// There is a c.duckdb_string_is_inlined that we could use instead of hard-coding
-				// the 12, but that requires dereferencing value, which I'd like to avoid.
-				// For one reason, when inlined, it's easy to accidently pass the address of the local copy
-				const value = &vc[self.index];
-				const len = value.value.inlined.length;
-				if (len <= 12) {
-					return value.value.inlined.inlined[0..len];
-				}
-				const pointer = value.value.pointer;
-				return pointer.ptr[0..len];
-			},
-			else => return null,
-		}
-	}
-
-	pub fn getI8(self: Row, col: usize) ?i8 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.i8 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getI16(self: Row, col: usize) ?i16 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.i16 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getI32(self: Row, col: usize) ?i32 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.i32 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getI64(self: Row, col: usize) ?i64 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.i64 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getI128(self: Row, col: usize) ?i128 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.i128 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getU8(self: Row, col: usize) ?u8 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.u8 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getU16(self: Row, col: usize) ?u16 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.u16 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getU32(self: Row, col: usize) ?u32 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.u32 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getU64(self: Row, col: usize) ?u64 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.u64 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getBool(self: Row, col: usize) ?bool {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.bool => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getF32(self: Row, col: usize) ?f32 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.f32 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getF64(self: Row, col: usize) ?f64 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.f64 => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getDate(self: Row, col: usize) ?Date {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.date => |vc| return c.duckdb_from_date(vc[self.index]),
-			else => return null,
-		}
-	}
-
-	pub fn getTime(self: Row, col: usize) ?Time {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.time => |vc| return c.duckdb_from_time(vc[self.index]),
-			else => return null,
-		}
-	}
-
-	pub fn getTimestamp(self: Row, col: usize) ?i64 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.timestamp => |vc| return vc[self.index].micros,
-			else => return null,
-		}
-	}
-
-	pub fn getInterval(self: Row, col: usize) ?Interval {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.interval => |vc| return vc[self.index],
-			else => return null,
-		}
-	}
-
-	pub fn getDecimal(self: Row, col: usize) ?f64 {
-		const column = self.columns[col];
-		if (self.isNull(column.validity)) return null;
-		switch (column.data) {
-			.decimal => |vc| {
-				const value = switch (vc.internal) {
-					inline else => |internal| hugeInt(internal[self.index]),
-				};
-				return c.duckdb_decimal_to_double(c.duckdb_decimal{
-					.width = vc.width,
-					.scale = vc.scale,
-					.value = value,
-				});
-			},
-			else => return null,
-		}
-	}
-
-	fn isNull(self: Row, validity: [*c]u64) bool {
+	pub fn get(self: Row, comptime T: type, col: usize) ?T {
 		const index = self.index;
-		const entry_index = index / 64;
-		const entry_mask = index % 64;
-		return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
+		const column = self.columns[col];
+		if (isNull(column.validity, index)) return null;
+
+		switch (column.data) {
+			.scalar => |scalar| return getScalar(T, scalar, index),
+			else => return null,
+		}
+	}
+
+	pub fn list(self: Row, comptime T: type, col: usize) ?List(T) {
+		const index = self.index;
+		const column = self.columns[col];
+		if (isNull(column.validity, index)) return null;
+
+		switch (column.data)  {
+			.container => |container| switch (container) {
+				.list => |vc| {
+					const entry = vc.entries[index];
+					return List(T).init(vc.child, vc.validity, entry.offset, entry.length);
+				},
+			},
+			else => return null,
+		}
 	}
 };
+
+fn isNull(validity: [*c]u64, index: usize) bool {
+	const entry_index = index / 64;
+	const entry_mask = index % 64;
+	return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
+}
+
+fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize) ?T {
+	switch (T) {
+		[]const u8 => return getBlob(scalar, index),
+		i8 => return getI8(scalar, index),
+		i16 => return getI16(scalar, index),
+		i32 => return getI32(scalar, index),
+		i64 => return getI64(scalar, index),
+		i128 => return getI128(scalar, index),
+		u8 => return getU8(scalar, index),
+		u16 => return getU16(scalar, index),
+		u32 => return getU32(scalar, index),
+		u64 => return getU64(scalar, index),
+		f32 => return getF32(scalar, index),
+		f64 => return getF64(scalar, index),
+		bool => return getBool(scalar, index),
+		Date => return getDate(scalar, index),
+		Time => return getTime(scalar, index),
+		Interval => return getInterval(scalar, index),
+		else => @compileError("Cannot get value of type " ++ @typeName(T)),
+	}
+}
+
+fn getBlob(scalar: ColumnData.Scalar, index: usize) ?[]const u8 {
+	switch (scalar) {
+		.blob => |vc| {
+			// This sucks. This is an untagged union. But both versions (inlined and pointer)
+			// have the same leading 8 bytes, including the length which is the first 4 bytes.
+			// There is a c.duckdb_string_is_inlined that we could use instead of hard-coding
+			// the 12, but that requires dereferencing value, which I'd like to avoid.
+			// For one reason, when inlined, it's easy to accidently pass the address of the local copy
+			const value = &vc[index];
+			const len = value.value.inlined.length;
+			if (len <= 12) {
+				return value.value.inlined.inlined[0..len];
+			}
+			const pointer = value.value.pointer;
+			return pointer.ptr[0..len];
+		},
+		else => return null,
+	}
+}
+
+fn getI8(scalar: ColumnData.Scalar, index: usize) ?i8 {
+	switch (scalar) {
+		.i8 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getI16(scalar: ColumnData.Scalar, index: usize) ?i16 {
+	switch (scalar) {
+		.i16 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getI32(scalar: ColumnData.Scalar, index: usize) ?i32 {
+	switch (scalar) {
+		.i32 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getI64(scalar: ColumnData.Scalar, index: usize) ?i64 {
+	switch (scalar) {
+		.i64 => |vc| return vc[index],
+		.timestamp => |vc| return vc[index].micros,
+		else => return null,
+	}
+}
+
+fn getI128(scalar: ColumnData.Scalar, index: usize) ?i128 {
+	switch (scalar) {
+		.i128 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getU8(scalar: ColumnData.Scalar, index: usize) ?u8 {
+	switch (scalar) {
+		.u8 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getU16(scalar: ColumnData.Scalar, index: usize) ?u16 {
+	switch (scalar) {
+		.u16 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getU32(scalar: ColumnData.Scalar, index: usize) ?u32 {
+	switch (scalar) {
+		.u32 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getU64(scalar: ColumnData.Scalar, index: usize) ?u64 {
+	switch (scalar) {
+		.u64 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getBool(scalar: ColumnData.Scalar, index: usize) ?bool {
+	switch (scalar) {
+		.bool => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getF32(scalar: ColumnData.Scalar, index: usize) ?f32 {
+	switch (scalar) {
+		.f32 => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+fn getF64(scalar: ColumnData.Scalar, index: usize) ?f64 {
+	switch (scalar) {
+		.f64 => |vc| return vc[index],
+		.decimal => |vc| {
+			const value = switch (vc.internal) {
+				inline else => |internal| hugeInt(internal[index]),
+			};
+			return c.duckdb_decimal_to_double(c.duckdb_decimal{
+				.width = vc.width,
+				.scale = vc.scale,
+				.value = value,
+			});
+		},
+		else => return null,
+	}
+}
+
+fn getDate(scalar: ColumnData.Scalar, index: usize) ?Date {
+	switch (scalar) {
+		.date => |vc| return c.duckdb_from_date(vc[index]),
+		else => return null,
+	}
+}
+
+fn getTime(scalar: ColumnData.Scalar, index: usize) ?Time {
+	switch (scalar) {
+		.time => |vc| return c.duckdb_from_time(vc[index]),
+		else => return null,
+	}
+}
+
+fn getInterval(scalar: ColumnData.Scalar, index: usize) ?Interval {
+	switch (scalar) {
+		.interval => |vc| return vc[index],
+		else => return null,
+	}
+}
+
+pub fn List(comptime T: type) type {
+	return struct{
+		len: usize,
+		_validity: [*c]u64,
+		_offset: usize,
+		_scalar: ColumnData.Scalar,
+
+		const Self = @This();
+
+		fn init(scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
+			return .{
+				.len = length,
+				._offset = offset,
+				._scalar = scalar,
+				._validity = validity,
+			};
+		}
+
+		fn get(self: Self, i: usize) ?T {
+			const index = i + self._offset;
+			if (isNull(self._validity, index)) return null;
+			return getScalar(T, self._scalar, index);
+		}
+	};
+}
 
 pub const Stmt = struct {
 	allocator: Allocator,
@@ -1067,7 +1136,7 @@ test "exec success" {
 
 	var rows = conn.queryZ("select * from t", .{}).ok;
 	defer rows.deinit();
-	try t.expectEqual(@as(i64, 39), (try rows.next()).?.getI32(0).?);
+	try t.expectEqual(@as(i64, 39), (try rows.next()).?.get(i32, 0).?);
 }
 
 test "query error" {
@@ -1097,7 +1166,7 @@ test "query select ok" {
 	};
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(@as(i32, 39213), row.getI32(0).?);
+	try t.expectEqual(@as(i32, 39213), row.get(i32, 0).?);
 	try t.expectEqual(@as(?Row, null), try rows.next());
 }
 
@@ -1178,12 +1247,12 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i64, 99), row.getI64(0).?);
-		try t.expectEqual(@as(f64, -32.01), row.getF64(1).?);
-		try t.expectEqual(true, row.getBool(2).?);
-		try t.expectEqual(false, row.getBool(3).?);
-		try t.expectEqual(@as(?i32, null), row.getI32(4));
-		try t.expectEqual(@as(i32, 44), row.getI32(5).?);
+		try t.expectEqual(@as(i64, 99), row.get(i64, 0).?);
+		try t.expectEqual(@as(f64, -32.01), row.get(f64, 1).?);
+		try t.expectEqual(true, row.get(bool, 2).?);
+		try t.expectEqual(false, row.get(bool, 3).?);
+		try t.expectEqual(@as(?i32, null), row.get(i32, 4));
+		try t.expectEqual(@as(i32, 44), row.get(i32, 5).?);
 	}
 
 	{
@@ -1199,12 +1268,12 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i64, 99), row.getI64(0).?);
-		try t.expectEqual(@as(i8, 2), row.getI8(1).?);
-		try t.expectEqual(@as(i16, 3), row.getI16(2).?);
-		try t.expectEqual(@as(i32, 4), row.getI32(3).?);
-		try t.expectEqual(@as(i64, 5), row.getI64(4).?);
-		try t.expectEqual(@as(i128, 6), row.getI128(5).?);
+		try t.expectEqual(@as(i64, 99), row.get(i64, 0).?);
+		try t.expectEqual(@as(i8, 2), row.get(i8, 1).?);
+		try t.expectEqual(@as(i16, 3), row.get(i16,2).?);
+		try t.expectEqual(@as(i32, 4), row.get(i32, 3).?);
+		try t.expectEqual(@as(i64, 5), row.get(i64, 4).?);
+		try t.expectEqual(@as(i128, 6), row.get(i128, 5).?);
 	}
 
 	{
@@ -1218,11 +1287,11 @@ test "binding" {
 		}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i8, 127), row.getI8(0).?);
-		try t.expectEqual(@as(i16, 32767), row.getI16(1).?);
-		try t.expectEqual(@as(i32, 2147483647), row.getI32(2).?);
-		try t.expectEqual(@as(i64, 9223372036854775807), row.getI64(3).?);
-		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), row.getI128(4).?);
+		try t.expectEqual(@as(i8, 127), row.get(i8, 0).?);
+		try t.expectEqual(@as(i16, 32767), row.get(i16,1).?);
+		try t.expectEqual(@as(i32, 2147483647), row.get(i32, 2).?);
+		try t.expectEqual(@as(i64, 9223372036854775807), row.get(i64, 3).?);
+		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), row.get(i128, 4).?);
 	}
 
 	{
@@ -1236,11 +1305,11 @@ test "binding" {
 		}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i8, -127), row.getI8(0).?);
-		try t.expectEqual(@as(i16, -32767), row.getI16(1).?);
-		try t.expectEqual(@as(i32, -2147483647), row.getI32(2).?);
-		try t.expectEqual(@as(i64, -9223372036854775807), row.getI64(3).?);
-		try t.expectEqual(@as(i128, -170141183460469231731687303715884105727), row.getI128(4).?);
+		try t.expectEqual(@as(i8, -127), row.get(i8, 0).?);
+		try t.expectEqual(@as(i16, -32767), row.get(i16,1).?);
+		try t.expectEqual(@as(i32, -2147483647), row.get(i32, 2).?);
+		try t.expectEqual(@as(i64, -9223372036854775807), row.get(i64, 3).?);
+		try t.expectEqual(@as(i128, -170141183460469231731687303715884105727), row.get(i128, 4).?);
 	}
 
 	{
@@ -1253,10 +1322,10 @@ test "binding" {
 		}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(u8, 255), row.getU8(0).?);
-		try t.expectEqual(@as(u16, 65535), row.getU16(1).?);
-		try t.expectEqual(@as(u32, 4294967295), row.getU32(2).?);
-		try t.expectEqual(@as(u64, 18446744073709551615), row.getU64(3).?);
+		try t.expectEqual(@as(u8, 255), row.get(u8, 0).?);
+		try t.expectEqual(@as(u16, 65535), row.get(u16, 1).?);
+		try t.expectEqual(@as(u32, 4294967295), row.get(u32, 2).?);
+		try t.expectEqual(@as(u64, 18446744073709551615), row.get(u64, 3).?);
 	}
 
 	{
@@ -1269,9 +1338,9 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(f64, 99.88), row.getF64(0).?);
-		try t.expectEqual(@as(f32, -3.192), row.getF32(1).?);
-		try t.expectEqual(@as(f64, 999.182), row.getF64(2).?);
+		try t.expectEqual(@as(f64, 99.88), row.get(f64, 0).?);
+		try t.expectEqual(@as(f32, -3.192), row.get(f32, 1).?);
+		try t.expectEqual(@as(f64, 999.182), row.get(f64, 2).?);
 	}
 
 	{
@@ -1283,8 +1352,8 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(f64, 1.23), row.getDecimal(0).?);
-		try t.expectEqual(@as(f64, -0.329148), row.getDecimal(1).?);
+		try t.expectEqual(@as(f64, 1.23), row.get(f64, 0).?);
+		try t.expectEqual(@as(f64, -0.329148), row.get(f64, 1).?);
 	}
 
 	{
@@ -1293,7 +1362,7 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("hello world", row.getVarchar(0).?);
+		try t.expectEqualStrings("hello world", row.get([]const u8, 0).?);
 	}
 
 	{
@@ -1305,7 +1374,7 @@ test "binding" {
 		var rows = conn.query("select $1::varchar", .{list.items[0]}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("i love keemun", row.getVarchar(0).?);
+		try t.expectEqualStrings("i love keemun", row.get([]const u8, 0).?);
 	}
 
 	{
@@ -1314,7 +1383,7 @@ test "binding" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings(&[_]u8{0, 1, 2}, row.getBlob(0).?);
+		try t.expectEqualStrings(&[_]u8{0, 1, 2}, row.get([]const u8, 0).?);
 	}
 
 	{
@@ -1326,7 +1395,7 @@ test "binding" {
 		var rows = conn.query("select $1::blob", .{list.items[0]}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("i love keemun2", row.getBlob(0).?);
+		try t.expectEqualStrings("i love keemun2", row.get([]const u8, 0).?);
 	}
 
 	{
@@ -1337,10 +1406,10 @@ test "binding" {
 		var rows = conn.query("select $1::date, $2::time, $3::timestamp, $4::interval", .{date, time, 751203002000000, interval}).ok;
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(date, row.getDate(0).?);
-		try t.expectEqual(time, row.getTime(1).?);
-		try t.expectEqual(@as(i64, 751203002000000), row.getTimestamp(2).?);
-		try t.expectEqual(interval, row.getInterval(3).?);
+		try t.expectEqual(date, row.get(Date, 0).?);
+		try t.expectEqual(time, row.get(Time, 1).?);
+		try t.expectEqual(@as(i64, 751203002000000), row.get(i64, 2).?);
+		try t.expectEqual(interval, row.get(Interval, 3).?);
 	}
 }
 
@@ -1367,15 +1436,15 @@ test "read varchar" {
 		, .{}).ok;
 		defer rows.deinit();
 
-		try t.expectEqualStrings("1", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("12345", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("123456789A", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("123456789AB", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("123456789ABC", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("123456789ABCD", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("123456789ABCDE", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqualStrings("123456789ABCDEF", (try rows.next()).?.getVarchar(0).?);
-		try t.expectEqual(@as(?[]const u8, null), (try rows.next()).?.getVarchar(0));
+		try t.expectEqualStrings("1", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("12345", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("123456789A", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("123456789AB", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("123456789ABC", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("123456789ABCD", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("123456789ABCDE", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualStrings("123456789ABCDEF", (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqual(@as(?[]const u8, null), (try rows.next()).?.get([]const u8, 0));
 		try t.expectEqual(@as(?Row, null), try rows.next());
 	}
 }
@@ -1398,10 +1467,10 @@ test "Row: read blob" {
 		, .{}).ok;
 		defer rows.deinit();
 
-		try t.expectEqualSlices(u8, @as([]const u8, &.{170}), (try rows.next()).?.getBlob(0).?);
-		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171}), (try rows.next()).?.getBlob(0).?);
-		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171, 170, 170, 170, 170, 171, 170, 170, 170, 170, 171}), (try rows.next()).?.getBlob(0).?);
-		try t.expectEqual(@as(?[]const u8, null), (try rows.next()).?.getBlob(0));
+		try t.expectEqualSlices(u8, @as([]const u8, &.{170}), (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171, 170, 170, 170, 170, 171, 170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0).?);
+		try t.expectEqual(@as(?[]const u8, null), (try rows.next()).?.get([]const u8, 0));
 		try t.expectEqual(@as(?Row, null), try rows.next());
 	}
 }
@@ -1426,44 +1495,44 @@ test "Row: read ints" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(i8, 0), row.getI8(0).?);
-		try t.expectEqual(@as(i16, 0), row.getI16(1).?);
-		try t.expectEqual(@as(i32, 0), row.getI32(2).?);
-		try t.expectEqual(@as(i64, 0), row.getI64(3).?);
-		try t.expectEqual(@as(i128, 0), row.getI128(4).?);
-		try t.expectEqual(@as(u8, 0), row.getU8(5).?);
-		try t.expectEqual(@as(u16, 0), row.getU16(6).?);
-		try t.expectEqual(@as(u32, 0), row.getU32(7).?);
-		try t.expectEqual(@as(u64, 0), row.getU64(8).?);
+		try t.expectEqual(@as(i8, 0), row.get(i8, 0).?);
+		try t.expectEqual(@as(i16, 0), row.get(i16,1).?);
+		try t.expectEqual(@as(i32, 0), row.get(i32, 2).?);
+		try t.expectEqual(@as(i64, 0), row.get(i64, 3).?);
+		try t.expectEqual(@as(i128, 0), row.get(i128, 4).?);
+		try t.expectEqual(@as(u8, 0), row.get(u8, 5).?);
+		try t.expectEqual(@as(u16, 0), row.get(u16, 6).?);
+		try t.expectEqual(@as(u32, 0), row.get(u32, 7).?);
+		try t.expectEqual(@as(u64, 0), row.get(u64, 8).?);
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(i8, 127), row.getI8(0).?);
-		try t.expectEqual(@as(i16, 32767), row.getI16(1).?);
-		try t.expectEqual(@as(i32, 2147483647), row.getI32(2).?);
-		try t.expectEqual(@as(i64, 9223372036854775807), row.getI64(3).?);
-		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), row.getI128(4).?);
-		try t.expectEqual(@as(u8, 255), row.getU8(5).?);
-		try t.expectEqual(@as(u16, 65535), row.getU16(6).?);
-		try t.expectEqual(@as(u32, 4294967295), row.getU32(7).?);
-		try t.expectEqual(@as(u64, 18446744073709551615), row.getU64(8).?);
+		try t.expectEqual(@as(i8, 127), row.get(i8, 0).?);
+		try t.expectEqual(@as(i16, 32767), row.get(i16,1).?);
+		try t.expectEqual(@as(i32, 2147483647), row.get(i32, 2).?);
+		try t.expectEqual(@as(i64, 9223372036854775807), row.get(i64, 3).?);
+		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), row.get(i128, 4).?);
+		try t.expectEqual(@as(u8, 255), row.get(u8, 5).?);
+		try t.expectEqual(@as(u16, 65535), row.get(u16, 6).?);
+		try t.expectEqual(@as(u32, 4294967295), row.get(u32, 7).?);
+		try t.expectEqual(@as(u64, 18446744073709551615), row.get(u64, 8).?);
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(i8, -127), row.getI8(0).?);
-		try t.expectEqual(@as(i16, -32767), row.getI16(1).?);
-		try t.expectEqual(@as(i32, -2147483647), row.getI32(2).?);
-		try t.expectEqual(@as(i64, -9223372036854775807), row.getI64(3).?);
-		try t.expectEqual(@as(i128, -170141183460469231731687303715884105727), row.getI128(4).?);
+		try t.expectEqual(@as(i8, -127), row.get(i8, 0).?);
+		try t.expectEqual(@as(i16, -32767), row.get(i16,1).?);
+		try t.expectEqual(@as(i32, -2147483647), row.get(i32, 2).?);
+		try t.expectEqual(@as(i64, -9223372036854775807), row.get(i64, 3).?);
+		try t.expectEqual(@as(i128, -170141183460469231731687303715884105727), row.get(i128, 4).?);
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(?i8, null), row.getI8(0));
-		try t.expectEqual(@as(?i16, null), row.getI16(1));
-		try t.expectEqual(@as(?i32, null), row.getI32(2));
-		try t.expectEqual(@as(?i64, null), row.getI64(3));
-		try t.expectEqual(@as(?i128, null), row.getI128(4));
-		try t.expectEqual(@as(?u8, null), row.getU8(5));
-		try t.expectEqual(@as(?u16, null), row.getU16(6));
-		try t.expectEqual(@as(?u32, null), row.getU32(7));
-		try t.expectEqual(@as(?u64, null), row.getU64(8));
+		try t.expectEqual(@as(?i8, null), row.get(i8, 0));
+		try t.expectEqual(@as(?i16, null), row.get(i16,1));
+		try t.expectEqual(@as(?i32, null), row.get(i32, 2));
+		try t.expectEqual(@as(?i64, null), row.get(i64, 3));
+		try t.expectEqual(@as(?i128, null), row.get(i128, 4));
+		try t.expectEqual(@as(?u8, null), row.get(u8, 5));
+		try t.expectEqual(@as(?u16, null), row.get(u16, 6));
+		try t.expectEqual(@as(?u32, null), row.get(u32, 7));
+		try t.expectEqual(@as(?u64, null), row.get(u64, 8));
 
 		try t.expectEqual(@as(?Row, null), try rows.next());
 	}
@@ -1481,9 +1550,9 @@ test "Row: read bool" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(false, row.getBool(0).?);
-		try t.expectEqual(true, row.getBool(1).?);
-		try t.expectEqual(@as(?bool, null), row.getBool(2));
+		try t.expectEqual(false, row.get(bool, 0).?);
+		try t.expectEqual(true, row.get(bool, 1).?);
+		try t.expectEqual(@as(?bool, null), row.get(bool, 2));
 
 		try t.expectEqual(@as(?Row, null), try rows.next());
 	}
@@ -1501,10 +1570,10 @@ test "Row: read float" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(f32, 32.329), row.getF32(0).?);
-		try t.expectEqual(@as(f64, -0.29291), row.getF64(1).?);
-		try t.expectEqual(@as(?f32, null), row.getF32(2));
-		try t.expectEqual(@as(?f64, null), row.getF64(3));
+		try t.expectEqual(@as(f32, 32.329), row.get(f32, 0).?);
+		try t.expectEqual(@as(f64, -0.29291), row.get(f64, 1).?);
+		try t.expectEqual(@as(?f32, null), row.get(f32, 2));
+		try t.expectEqual(@as(?f64, null), row.get(f64, 3));
 
 		try t.expectEqual(@as(?Row, null), try rows.next());
 	}
@@ -1523,11 +1592,11 @@ test "Row: read decimal" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(f64, 1.23), row.getDecimal(0).?);
-		try t.expectEqual(@as(f64, 1.24), row.getDecimal(1).?);
-		try t.expectEqual(@as(f64, 1.25), row.getDecimal(2).?);
-		try t.expectEqual(@as(f64, 1.26), row.getDecimal(3).?);
-		try t.expectEqual(@as(f64, 1.27), row.getDecimal(4).?);
+		try t.expectEqual(@as(f64, 1.23), row.get(f64, 0).?);
+		try t.expectEqual(@as(f64, 1.24), row.get(f64, 1).?);
+		try t.expectEqual(@as(f64, 1.25), row.get(f64, 2).?);
+		try t.expectEqual(@as(f64, 1.26), row.get(f64, 3).?);
+		try t.expectEqual(@as(f64, 1.27), row.get(f64, 4).?);
 	}
 }
 
@@ -1543,11 +1612,34 @@ test "Row: read date & time" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(Date{.year = 1992, .month = 9, .day = 20}, row.getDate(0).?);
-		try t.expectEqual(Time{.hour = 14, .min = 21, .sec = 13, .micros = 332000}, row.getTime(1).?);
-		try t.expectEqual(@as(?i64, 751203002000000), row.getTimestamp(2).?);
+		try t.expectEqual(Date{.year = 1992, .month = 9, .day = 20}, row.get(Date, 0).?);
+		try t.expectEqual(Time{.hour = 14, .min = 21, .sec = 13, .micros = 332000}, row.get(Time, 1).?);
+		try t.expectEqual(@as(?i64, 751203002000000), row.get(i64, 2).?);
 	}
 }
+
+test "Row: list" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		var rows = conn.queryZ("select [1, 32, 99, null, -4]::int[]", .{}).ok;
+		defer rows.deinit();
+
+		var row = (try rows.next()) orelse unreachable;
+		const list = row.list(i32, 0).?;
+		try t.expectEqual(@as(usize, 5), list.len);
+		try t.expectEqual(@as(i32, 1), list.get(0).?);
+		try t.expectEqual(@as(i32, 32), list.get(1).?);
+		try t.expectEqual(@as(i32, 99), list.get(2).?);
+		try t.expectEqual(@as(?i32, null), list.get(3));
+		try t.expectEqual(@as(i32, -4), list.get(4).?);
+	}
+}
+
 
 test "transaction" {
 	const db = DB.init(t.allocator, ":memory:").ok;
@@ -1576,7 +1668,7 @@ test "transaction" {
 
 		var rows = conn.queryZ("select * from t", .{}).ok;
 		defer rows.deinit();
-		try t.expectEqual(@as(i32, 1), (try rows.next()).?.getI32(0).?);
+		try t.expectEqual(@as(i32, 1), (try rows.next()).?.get(i32, 0).?);
 	}
 }
 
