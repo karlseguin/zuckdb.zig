@@ -48,7 +48,7 @@ defer conn.deinit();
         },
     }
     defer rows.deinit();
-    while (rows.next()) |row| {
+    while (try rows.next()) |row| {
         // get the 0th column of the current row
         const id = row.get(i32, 0);
         std.debug.print("The id is: {d}", .{id});

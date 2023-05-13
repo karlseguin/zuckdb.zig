@@ -735,6 +735,10 @@ pub const Stmt = struct {
 		return .{.ok = {}};
 	}
 
+	pub fn bindDynamic(self: Stmt, i: usize, value: anytype) !void {
+		_ = try bindValue(@TypeOf(value), self.stmt.*, value, i+1);
+	}
+
 	pub fn execute(self: Stmt) Result(Rows) {
 		const stmt = self.stmt;
 		const allocator = self.allocator;
@@ -1667,7 +1671,6 @@ test "Row: list" {
 	}
 }
 
-
 test "transaction" {
 	const db = DB.init(t.allocator, ":memory:").ok;
 	defer db.deinit();
@@ -1768,6 +1771,28 @@ test "query parameters" {
 	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
 	try t.expectEqual(@as(usize, 18), stmt.parameterTypeC(18));
 	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
+}
+
+test "bindDynamic" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	const stmt = conn.prepareZ("select $1::int, $2, $3::smallint").ok;
+	errdefer stmt.deinit();
+	try stmt.bindDynamic(0, null);
+	try stmt.bindDynamic(1, "over");
+	try stmt.bindDynamic(2, 9000);
+
+	var rows = stmt.execute().ok;
+	defer rows.deinit();
+
+	const row = (try rows.next()).?;
+	try t.expectEqual(@as(?i32, null), row.get(i32, 0));
+	try t.expectEqualStrings("over", row.get([]u8, 1).?);
+	try t.expectEqual(@as(i16, 9000), row.get(i16, 2).?);
 }
 
 test "Pool" {
