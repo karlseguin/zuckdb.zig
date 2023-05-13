@@ -223,7 +223,7 @@ pub const Rows = struct {
 	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Result(Rows) {
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
-
+		const column_count = c.duckdb_column_count(result);
 		if (chunk_count == 0) {
 			// no chunk, we don't need to load everything else
 			return .{.ok = .{
@@ -231,10 +231,9 @@ pub const Rows = struct {
 				.result = result,
 				.chunk_count = 0,
 				.allocator = allocator,
+				.column_count = column_count,
 			}};
 		}
-
-		const column_count = c.duckdb_column_count(result);
 
 		const column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
 			return .{.err = ResultErr.fromAllocator(err, .{
@@ -289,6 +288,10 @@ pub const Rows = struct {
 
 	pub fn count(self: Rows) usize {
 		return c.duckdb_row_count(self.result);
+	}
+
+	pub fn columnName(self: Rows, i: usize) [*c]const u8 {
+		return c.duckdb_column_name(self.result, i);
 	}
 
 	pub fn next(self: *Rows) !?Row {
@@ -1215,6 +1218,22 @@ test "query mutate ok" {
 		try t.expectEqual(@as(usize, 1), rows.count());
 		try t.expectEqual(@as(usize, 1), rows.changed());
 	}
+}
+
+test "query column names" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	try conn.execZ("create table test(id integer, name varchar);");
+	const rows = conn.queryZ("select id, name from test", .{}).ok;
+	defer rows.deinit();
+	try t.expectEqual(@as(usize, 2), rows.column_count);
+	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
+	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
+
 }
 
 test "prepare error" {
