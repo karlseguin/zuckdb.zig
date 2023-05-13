@@ -56,6 +56,8 @@ defer conn.deinit();
 }
 ```
 
+`query` and `exec` are the two primary functions used to run queries. The `queryZ` and `execZ` versions are optimized when the 1st parameter (the sql string) is known to be null-terminated (so you should favor using `execZ` or `queryZ` if you have a static SQL string). `exec` and `execZ` does not accept SQL parameters and only returns an `!void` (i.e. no detailed message, no rows), but will run slightly faster.
+
 You'll notice that the library does not use idiomatic error sets, but rather a Rust-like results. This was done so that the error message could be exposed. As a consequence, you'll also notice that `deinit` must be called on BOTH the `ok` and `err` values. There are two options to deal with this. In the above example, `deinit` is called in both cases:
 
 ```zig
