@@ -123,7 +123,6 @@ const tags = row.list([]u8, 3) orelse unreachable; // TODO handle null properly
 for (0..tags.len) |i| {
     const tag = tags.get(i);
     // get returns a nullable, so above, tag could be null
-
 }
 ```
 

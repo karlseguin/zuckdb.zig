@@ -164,6 +164,28 @@ pub const Conn = struct {
 		return stmt.execute();
 	}
 
+	pub fn row(self: Conn, sql: []const u8, values: anytype) !?OwningRow {
+		const zql = try self.allocator.dupeZ(u8, sql);
+		defer self.allocator.free(zql);
+		return self.rowZ(zql, values);
+	}
+
+	pub fn rowZ(self: Conn, sql: [:0]const u8, values: anytype) !?OwningRow
+	 {
+		const query_result = self.queryZ(sql, values);
+		errdefer query_result.deinit();
+		var rows = switch (query_result) {
+			.ok => |rows| rows,
+			.err => |err| return err.err,
+		};
+
+		const r = (try rows.next()) orelse {
+			query_result.deinit();
+			return null;
+		};
+		return .{.row = r, .rows = rows};
+	}
+
 	pub fn prepare(self: *const Conn, sql: []const u8) Result(Stmt) {
 		const zql = self.allocator.dupeZ(u8, sql) catch |err| {
 			return .{.err = ResultErr.fromAllocator(err, .{}) };
@@ -525,6 +547,25 @@ pub const Row = struct {
 			},
 			else => return null,
 		}
+	}
+};
+
+// Returned by conn.row / rowZ, wraps a row and rows, the latter so that
+// it can be deinit'd
+pub const OwningRow = struct {
+	row: Row,
+	rows: Rows,
+
+	pub fn get(self: OwningRow, comptime T: type, col: usize) ?scalarReturn(T) {
+		return self.row.get(T, col);
+	}
+
+	pub fn list(self: OwningRow, comptime T: type, col: usize) ?List(T) {
+		return self.row.list(T, col);
+	}
+
+	pub fn deinit(self: OwningRow) void {
+		self.rows.deinit();
 	}
 };
 
@@ -1199,7 +1240,7 @@ pub const ResultErr = struct {
 		return .{
 			.stmt = stmt,
 			.result = result,
-			.err = error.Result,
+			.err = error.InvalidSQL,
 			.allocator = allocator,
 			.desc = std.mem.span(c.duckdb_result_error(result)),
 		};
@@ -1900,6 +1941,30 @@ test "bindDynamic" {
 	try t.expectEqual(@as(?i32, null), row.get(i32, 0));
 	try t.expectEqualStrings("over", row.get([]u8, 1).?);
 	try t.expectEqual(@as(i16, 9000), row.get(i16, 2).?);
+}
+
+test "owning row" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		// error case
+		try t.expectError(error.InvalidSQL, conn.row("select x", .{}));
+	}
+
+	{
+		// null
+		try t.expectEqual(@as(?OwningRow, null), try conn.row("select 1 where false", .{}));
+	}
+
+	{
+		const row = (try conn.rowZ("select $1::bigint", .{-991823891832})).?;
+		defer row.deinit();
+		try t.expectEqual(@as(i64, -991823891832), row.get(i64, 0).?);
+	}
 }
 
 test "Pool" {
