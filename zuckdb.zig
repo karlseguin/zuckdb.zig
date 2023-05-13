@@ -18,6 +18,7 @@ const STATEMENT_ALIGNOF = c.statement_alignof;
 pub const Date = c.duckdb_date_struct;
 pub const Time = c.duckdb_time_struct;
 pub const Interval = c.duckdb_interval;
+pub const UUID = [36]u8;
 
 pub const DB = struct{
 	allocator: Allocator,
@@ -412,6 +413,7 @@ const ColumnData = struct {
 		timestamp: [*]c.duckdb_timestamp,
 		interval: [*]c.duckdb_interval,
 		decimal: ColumnData.Decimal,
+		uuid: [*c]i128,
 	};
 
 	const Container = union(enum) {
@@ -446,7 +448,7 @@ fn generateScalarColumnData(vector: c.duckdb_vector, column_type: usize) ?Column
 		c.DUCKDB_TYPE_SMALLINT => return .{.i16 = @ptrCast([*c]i16, @alignCast(2, raw_data))},
 		c.DUCKDB_TYPE_INTEGER => return .{.i32 = @ptrCast([*c]i32, @alignCast(4, raw_data))},
 		c.DUCKDB_TYPE_BIGINT => return .{.i64 = @ptrCast([*c]i64, @alignCast(8, raw_data))},
-		c.DUCKDB_TYPE_HUGEINT => return .{.i128 = @ptrCast([*c]i128, @alignCast(16, raw_data))},
+		c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID => return .{.i128 = @ptrCast([*c]i128, @alignCast(16, raw_data))},
 		c.DUCKDB_TYPE_UTINYINT => return .{.u8 = @ptrCast([*c]u8, raw_data)},
 		c.DUCKDB_TYPE_USMALLINT => return .{.u16 = @ptrCast([*c]u16, @alignCast(2, raw_data))},
 		c.DUCKDB_TYPE_UINTEGER => return .{.u32 = @ptrCast([*c]u32, @alignCast(4, raw_data))},
@@ -557,6 +559,7 @@ fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize) ?scalarR
 		Date => return getDate(scalar, index),
 		Time => return getTime(scalar, index),
 		Interval => return getInterval(scalar, index),
+		UUID => return getUUID(scalar, index),
 		else => @compileError("Cannot get value of type " ++ @typeName(T)),
 	}
 }
@@ -615,6 +618,94 @@ fn getI128(scalar: ColumnData.Scalar, index: usize) ?i128 {
 		.i128 => |vc| return vc[index],
 		else => return null,
 	}
+}
+
+
+// largely taken from duckdb's uuid type
+fn getUUID(scalar: ColumnData.Scalar, index: usize) ?UUID {
+	const hex = "0123456789abcdef";
+	const n = getI128(scalar, index) orelse return null;
+
+	const h = hugeInt(n);
+
+	const u = h.upper ^ (@as(i64, 1) << 63);
+	const l = h.lower;
+
+	var buf: [36]u8 = undefined;
+
+	const b1 = @intCast(u8, (u >> 56) & 0xFF);
+	buf[0] = hex[b1 >> 4];
+	buf[1] = hex[b1 & 0x0f];
+
+	const b2 = @intCast(u8, (u >> 48) & 0xFF);
+	buf[2] = hex[b2 >> 4];
+	buf[3] = hex[b2 & 0x0f];
+
+	const b3 = @intCast(u8, (u >> 40) & 0xFF);
+	buf[4] = hex[b3 >> 4];
+	buf[5] = hex[b3 & 0x0f];
+
+	const b4 = @intCast(u8, (u >> 32) & 0xFF);
+	buf[6] = hex[b4 >> 4];
+	buf[7] = hex[b4 & 0x0f];
+
+	buf[8] = '-';
+
+	const b5 = @intCast(u8, (u >> 24) & 0xFF);
+	buf[9] = hex[b5 >> 4];
+	buf[10] = hex[b5 & 0x0f];
+
+	const b6 = @intCast(u8, (u >> 16) & 0xFF);
+	buf[11] = hex[b6 >> 4];
+	buf[12] = hex[b6 & 0x0f];
+
+	buf[13] = '-';
+
+	const b7 = @intCast(u8, (u >> 8) & 0xFF);
+	buf[14] = hex[b7 >> 4];
+	buf[15] = hex[b7 & 0x0f];
+
+	const b8 = @intCast(u8, u & 0xFF);
+	buf[16] = hex[b8 >> 4];
+	buf[17] = hex[b8 & 0x0f];
+
+	buf[18] = '-';
+
+	const b9 = @intCast(u8, (l >> 56) & 0xFF);
+	buf[19] = hex[b9 >> 4];
+	buf[20] = hex[b9 & 0x0f];
+
+	const b10 = @intCast(u8, (l >> 48) & 0xFF);
+	buf[21] = hex[b10 >> 4];
+	buf[22] = hex[b10 & 0x0f];
+
+	buf[23] = '-';
+
+	const b11 = @intCast(u8, (l >> 40) & 0xFF);
+	buf[24] = hex[b11 >> 4];
+	buf[25] = hex[b11 & 0x0f];
+
+	const b12 = @intCast(u8, (l >> 32) & 0xFF);
+	buf[26] = hex[b12 >> 4];
+	buf[27] = hex[b12 & 0x0f];
+
+	const b13 = @intCast(u8, (l >> 24) & 0xFF);
+	buf[28] = hex[b13 >> 4];
+	buf[29] = hex[b13 & 0x0f];
+
+	const b14 = @intCast(u8, (l >> 16) & 0xFF);
+	buf[30] = hex[b14 >> 4];
+	buf[31] = hex[b14 & 0x0f];
+
+	const b15 = @intCast(u8, (l >> 8) & 0xFF);
+	buf[32] = hex[b15 >> 4];
+	buf[33] = hex[b15 & 0x0f];
+
+	const b16 = @intCast(u8, l & 0xFF);
+	buf[34] = hex[b16 >> 4];
+	buf[35] = hex[b16 & 0x0f];
+
+	return buf;
 }
 
 fn getU8(scalar: ColumnData.Scalar, index: usize) ?u8 {
@@ -880,6 +971,10 @@ fn bindVarcharOrBlob(stmt: c.duckdb_prepared_statement, bind_index: usize, value
 	switch (c.duckdb_param_type(stmt, bind_index)) {
 		c.DUCKDB_TYPE_VARCHAR => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
+		c.DUCKDB_TYPE_UUID => {
+			if (len != 36) return DuckDBError;
+			return c.duckdb_bind_varchar_length(stmt, bind_index, @ptrCast([*c]const u8, value), len);
+		},
 		else => return DuckDBError,
 	}
 }
@@ -1288,13 +1383,13 @@ test "binding" {
 
 	{
 		// int basic signed
-		var rows = conn.query("select $1, $2, $3, $4, $5, $6", .{
+		var rows = conn.query("select $1, $2, $3, $4, $5, $6::hugeint", .{
 			99,
 			@as(i8, 2),
 			@as(i16, 3),
 			@as(i32, 4),
 			@as(i64, 5),
-			@as(i128, 6)
+			@as(i128, -9955340232221457974987)
 		}).ok;
 		defer rows.deinit();
 
@@ -1304,7 +1399,7 @@ test "binding" {
 		try t.expectEqual(@as(i16, 3), row.get(i16,2).?);
 		try t.expectEqual(@as(i32, 4), row.get(i32, 3).?);
 		try t.expectEqual(@as(i64, 5), row.get(i64, 4).?);
-		try t.expectEqual(@as(i128, 6), row.get(i128, 5).?);
+		try t.expectEqual(@as(i128, -9955340232221457974987), row.get(i128, 5).?);
 	}
 
 	{
@@ -1385,6 +1480,18 @@ test "binding" {
 		const row = (try rows.next()).?;
 		try t.expectEqual(@as(f64, 1.23), row.get(f64, 0).?);
 		try t.expectEqual(@as(f64, -0.329148), row.get(f64, 1).?);
+	}
+
+	{
+		// uuid
+		var rows = conn.query("select $1::uuid, $2::uuid, $3::uuid, $4::uuid", .{"578D0DF0-A76F-4A8E-A463-42F8A4F133C8", "00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"}).ok;
+		defer rows.deinit();
+
+		const row = (try rows.next()).?;
+		try t.expectEqualStrings("578d0df0-a76f-4a8e-a463-42f8a4f133c8", &(row.get(UUID, 0).?));
+		try t.expectEqualStrings("00000000-0000-0000-0000-000000000000", &(row.get(UUID, 1).?));
+		try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 2).?));
+		try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 3).?));
 	}
 
 	{

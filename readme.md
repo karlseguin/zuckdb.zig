@@ -112,6 +112,7 @@ The supported types for `get`, are:
 * `zuckdb.Date`
 * `zuckdb.Time`
 * `zuckdb.Interval`
+* `zuckdb.UUID`
 
 There are a few important notes. First calling `get` with the wrong type will result in `null` being returned. Second, `get(T, i)` usually returns a `?T`. The only exception to this is `get(u8, i)` which returns a `[]const u8` - I just didn't want to type `get([]const u8)` all the time.
 
