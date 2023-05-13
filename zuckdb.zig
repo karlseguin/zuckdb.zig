@@ -152,11 +152,14 @@ pub const Conn = struct {
 			.err => |err| return .{.err = err},
 		};
 
-		switch (stmt.bind(values)) {
-			.ok => {},
-			.err => |err| return .{.err = err},
-		}
-
+		stmt.bind(values) catch |err| {
+			return .{.err = .{
+				.err = err,
+				.stmt = stmt.stmt,
+				.desc = "bind error",
+				.allocator = self.allocator,
+			}};
+		};
 		return stmt.execute();
 	}
 
@@ -176,7 +179,12 @@ pub const Conn = struct {
 
 		const stmt = @ptrCast(*c.duckdb_prepared_statement, slice.ptr);
 		if (c.duckdb_prepare(self.conn.*, sql, stmt) == DuckDBError) {
-			return .{.err = ResultErr.fromStmt(allocator, stmt) };
+			return .{.err = .{
+				.err = error.Prepare,
+				.stmt = stmt,
+				.desc = std.mem.span(c.duckdb_prepare_error(stmt.*)),
+				.allocator = allocator,
+			}};
 		}
 
 		return .{.ok = .{.stmt = stmt, .allocator = allocator}};
@@ -725,14 +733,11 @@ pub const Stmt = struct {
 		self.allocator.free(@ptrCast([*]u8, stmt)[0..STATEMENT_SIZEOF]);
 	}
 
-	pub fn bind(self: Stmt, values: anytype) Result(void) {
+	pub fn bind(self: Stmt, values: anytype) !void {
 		const stmt = self.stmt.*;
 		inline for (values, 0..) |value, i| {
-			_ = bindValue(@TypeOf(value), stmt, value, i + 1) catch |err| {
-				return .{.err = ResultErr.static(err, "Failed to bind parameter", .{.stmt = self.stmt})};
-			};
+			_ = try bindValue(@TypeOf(value), stmt, value, i + 1);
 		}
-		return .{.ok = {}};
 	}
 
 	pub fn bindDynamic(self: Stmt, i: usize, value: anytype) !void {
@@ -1013,7 +1018,11 @@ pub const ParameterType = enum {
 	i128,
 	varchar,
 	blob,
-	decimal
+	decimal,
+
+	pub fn jsonStringify(self: ParameterType, options: std.json.StringifyOptions, out: anytype) !void {
+		return std.json.encodeJsonString(@tagName(self), options, out);
+	}
 };
 
 const DBResultTag = enum {
@@ -1089,15 +1098,6 @@ pub const ResultErr = struct {
 
 	fn static(err: anyerror, desc: [:0]const u8, own: Ownership) ResultErr {
 		return .{.err = err, .desc = desc, .stmt = own.stmt, .result = own.result};
-	}
-
-	fn fromStmt(allocator: Allocator, stmt: *c.duckdb_prepared_statement) ResultErr {
-		return .{
-			.stmt = stmt,
-			.allocator = allocator,
-			.err = error.PreparedStatemen,
-			.desc = std.mem.span(c.duckdb_prepare_error(stmt.*)),
-		};
 	}
 
 	fn fromResult(allocator: Allocator, stmt: ?*c.duckdb_prepared_statement, result: *c.duckdb_result) ResultErr {
