@@ -121,7 +121,8 @@ for (0..tags.len) |i| {
     const tag = tags.get(i);
     // get returns a nullable, so above, tag could be null
 
-}```
+}
+```
 
 # Pool
 The `zuckdb.Pool` is a thread-safe connection pool:
