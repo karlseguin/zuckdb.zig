@@ -176,7 +176,10 @@ pub const Conn = struct {
 		errdefer query_result.deinit();
 		var rows = switch (query_result) {
 			.ok => |rows| rows,
-			.err => |err| return err.err,
+			.err => |err| {
+				std.log.err("zuckdb conn.row error: {s}\n", .{err.desc});
+				return err.err;
+			},
 		};
 
 		const r = (try rows.next()) orelse {
@@ -1014,7 +1017,7 @@ fn bindVarcharOrBlob(stmt: c.duckdb_prepared_statement, bind_index: usize, value
 		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
 		c.DUCKDB_TYPE_UUID => {
 			if (len != 36) return DuckDBError;
-			return c.duckdb_bind_varchar_length(stmt, bind_index, @ptrCast([*c]const u8, value), len);
+			return c.duckdb_bind_varchar_length(stmt, bind_index, value, 36);
 		},
 		else => return DuckDBError,
 	}
