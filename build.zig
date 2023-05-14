@@ -5,11 +5,11 @@ pub fn build(b: *std.Build) !void {
 	const optimize = b.standardOptimizeOption(.{});
 
 	_ = b.addModule("zuckdb", .{
-		.source_file = .{ .path = "zuckdb.zig" },
+		.source_file = .{ .path = "src/zuckdb.zig" },
 	});
 
 	const lib_test = b.addTest(.{
-		.root_source_file = .{ .path = "zuckdb.zig" },
+		.root_source_file = .{ .path = "src/zuckdb.zig" },
 		.target = target,
 		.optimize = optimize,
 	});
