@@ -129,14 +129,14 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 			switch (ptr.size) {
 				.One => rc = try bindValue(ptr.child, stmt, value, bind_index),
 				.Slice => switch (ptr.child) {
-					u8 => rc = bindVarcharOrBlob(stmt, bind_index, value.ptr, value.len),
+					u8 => rc = bindByteArray(stmt, bind_index, value.ptr, value.len),
 					else => bindError(T),
 				},
 				else => bindError(T),
 			}
 		},
 		.Array => |arr| switch (arr.child) {
-			u8 => rc = bindVarcharOrBlob(stmt, bind_index, value, value.len),
+			u8 => rc = bindByteArray(stmt, bind_index, value, value.len),
 			else => bindError(T),
 		},
 		.Optional => |opt| {
@@ -173,7 +173,7 @@ fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_u
 	}
 }
 
-fn bindVarcharOrBlob(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
+fn bindByteArray(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
 	switch (c.duckdb_param_type(stmt, bind_index)) {
 		c.DUCKDB_TYPE_VARCHAR => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
