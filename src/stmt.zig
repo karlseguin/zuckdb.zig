@@ -136,7 +136,7 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 			}
 		},
 		.Array => |arr| switch (arr.child) {
-			u8 => rc = c.duckdb_bind_varchar_length(stmt, bind_index, value, value.len),
+			u8 => rc = bindVarcharOrBlob(stmt, bind_index, value, value.len),
 			else => bindError(T),
 		},
 		.Optional => |opt| {
@@ -181,6 +181,9 @@ fn bindVarcharOrBlob(stmt: c.duckdb_prepared_statement, bind_index: usize, value
 			if (len != 36) return DuckDBError;
 			return c.duckdb_bind_varchar_length(stmt, bind_index, value, 36);
 		},
+		// this one is weird, but duckdb will return DUCKDB_TYPE_INVALID if it doesn't
+		// know the type, such as: "select $1", but binding will still work
+		c.DUCKDB_TYPE_INVALID => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		else => return DuckDBError,
 	}
 }
@@ -362,8 +365,12 @@ test "binding: text" {
 	defer conn.deinit();
 
 	{
-		var rows = conn.query("select $1", .{"hello world",}).ok;
-		defer rows.deinit();
+		var result = conn.query("select $1", .{"hello world"});
+		defer result.deinit();
+		var rows = switch(result) {
+			.ok => |rows| rows,
+			.err => |err| @panic(err.desc),
+		};
 
 		const row = (try rows.next()).?;
 		try t.expectEqualStrings("hello world", row.get([]u8, 0).?);
@@ -383,7 +390,7 @@ test "binding: text" {
 
 	{
 		// blob
-		var rows = conn.query("select $1", .{&[_]u8{0, 1, 2}}).ok;
+		var rows = conn.query("select $1::blob", .{&[_]u8{0, 1, 2}}).ok;
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
@@ -503,7 +510,7 @@ test "bindDynamic" {
 	const conn = try db.conn();
 	defer conn.deinit();
 
-	const stmt = conn.prepareZ("select $1::int, $2, $3::smallint").ok;
+	const stmt = conn.prepareZ("select $1::int, $2::varchar, $3::smallint").ok;
 	errdefer stmt.deinit();
 	try stmt.bindDynamic(0, null);
 	try stmt.bindDynamic(1, "over");
