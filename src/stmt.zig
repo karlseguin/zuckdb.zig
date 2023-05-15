@@ -42,17 +42,25 @@ pub const Stmt = struct {
 	}
 
 	pub fn execute(self: Stmt) Result(Rows) {
+		return self.executeReleaseable(true);
+	}
+
+	// When releasable == true, calling deinit on the result (or the result rows
+	// or error) will deinit the statement.
+	// When releaseable == false, deinit is not called on the statement. This is
+	// meant for cached statements executed via conn.queryCache
+	pub fn executeReleaseable(self: Stmt, releaseable: bool) Result(Rows) {
 		const stmt = self.stmt;
 		const allocator = self.allocator;
 		var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
-			return Result(Rows).allocErr(err, .{.stmt = stmt});
+			return Result(Rows).allocErr(err, .{.stmt = if (releaseable) stmt else null});
 		};
 
 		const result = @ptrCast(*c.duckdb_result, slice.ptr);
 		if (c.duckdb_execute_prepared(stmt.*, result) == DuckDBError) {
-			return Result(Rows).resultErr(allocator, stmt, result);
+			return Result(Rows).resultErr(allocator, if (releaseable) stmt else null, result);
 		}
-		return Rows.init(allocator, self, result);
+		return Rows.init(allocator, if (releaseable) self else null, result);
 	}
 
 	pub fn numberOfParameters(self: Stmt) usize {

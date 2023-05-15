@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Pool = struct {
 	db: DB,
+	version: u32,
 	mutex: std.Thread.Mutex,
 	cond: std.Thread.Condition,
 	conns: []Conn,
@@ -57,6 +58,7 @@ pub const Pool = struct {
 		return .{.ok = .{
 			.db = db,
 			.conns = conns,
+			.version = 0,
 			.available = size,
 			.allocator = allocator,
 			.mutex = std.Thread.Mutex{},
@@ -83,9 +85,15 @@ pub const Pool = struct {
 				continue;
 			}
 			const index = available - 1;
-			const conn = conns[index];
+			var conn = conns[index];
 			self.available = index;
+			const pv = self.version;
 			self.mutex.unlock();
+
+			if (conn.version != pv) {
+				conn.clearStatementCache();
+				conn.version = pv;
+			}
 			return conn;
 		}
 	}
@@ -99,6 +107,12 @@ pub const Pool = struct {
 		self.available = available + 1;
 		self.mutex.unlock();
 		self.cond.signal();
+	}
+
+	pub fn incrementVersion(self: *Pool) void {
+		self.mutex.lock();
+		self.version += 1;
+		self.mutex.unlock();
 	}
 };
 
@@ -129,11 +143,80 @@ test "Pool" {
 
 	const result = c1.queryZ("delete from pool_test", .{});
 	defer result.deinit();
-	try t.expectEqual(@as(usize, 3000), result.ok.changed());
+	try t.expectEqual(@as(usize, 6000), result.ok.changed());
+}
+
+test "Pool: versioning" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	var pool = db.pool(.{.size = 2,}).ok;
+	defer pool.deinit();
+
+	try t.expectEqual(@as(u32, 0), pool.version);
+
+	pool.incrementVersion();
+	try t.expectEqual(@as(u32, 1), pool.version);
+
+	pool.incrementVersion();
+	try t.expectEqual(@as(u32, 2), pool.version);
+}
+
+test "Pool: conn version management" {
+	const db = DB.init(t.allocator, ":memory:").ok;
+	var pool = db.pool(.{.size = 2,}).ok;
+	defer pool.deinit();
+
+	{
+		const c1 = pool.acquire();
+		const c2 = pool.acquire();
+		try t.expectEqual(@as(u32, 0), c1.version);
+		try t.expectEqual(@as(u32, 0), c1.version);
+		pool.release(c1);
+		pool.release(c2);
+	}
+
+	{
+		pool.incrementVersion();
+		const c1 = pool.acquire();
+		const c2 = pool.acquire();
+		try t.expectEqual(@as(u32, 1), c1.version);
+		try t.expectEqual(@as(u32, 1), c2.version);
+		pool.release(c1);
+		pool.release(c2);
+	}
+
+	{
+		pool.incrementVersion();
+		const c1 = pool.acquire();
+		const c2 = pool.acquire();
+		try t.expectEqual(@as(u32, 2), c1.version);
+		try t.expectEqual(@as(u32, 2), c2.version);
+		pool.release(c1);
+		pool.release(c2);
+	}
+
+	{
+		// c1 acquired before increment
+		const c1 = pool.acquire();
+		pool.incrementVersion();
+		const c2 = pool.acquire();
+		try t.expectEqual(@as(u32, 2), c1.version);
+		try t.expectEqual(@as(u32, 3), c2.version);
+		pool.release(c1);
+		pool.release(c2);
+	}
+
+	{
+		const c1 = pool.acquire();
+		const c2 = pool.acquire();
+		try t.expectEqual(@as(u32, 3), c1.version);
+		try t.expectEqual(@as(u32, 3), c2.version);
+		pool.release(c1);
+		pool.release(c2);
+	}
 }
 
 fn testPool(p: *Pool) void {
-	for (0..1000) |i| {
+	for (0..2000) |i| {
 		const conn = p.acquire();
 		conn.queryZ("insert into pool_test (id) values ($1)", .{i}).ok.deinit();
 		p.release(conn);
