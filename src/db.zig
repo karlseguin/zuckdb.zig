@@ -13,7 +13,7 @@ const DB_SIZEOF = c.database_sizeof;
 const DB_ALIGNOF = c.database_alignof;
 
 pub const Config = struct {
-	enable_external_access: bool = false,
+	enable_external_access: bool = true,
 };
 
 pub const DB = struct{
@@ -32,8 +32,6 @@ pub const DB = struct{
 			return Result(DB).staticErr(error.CreateConfig, "error creating database config");
 		}
 
-		// this is enabled by default, which seems weird to me, so our config has it
-		// disabled by default.
 		if (db_config.enable_external_access == false) {
 			if (c.duckdb_set_config(config.*, "enable_external_access", "false") == DuckDBError) {
 				return Result(DB).staticErr(error.ConfigEA, "could not disable external access");
