@@ -378,6 +378,7 @@ test "read varchar" {
 		, .{}).ok;
 		defer rows.deinit();
 
+		std.debug.print("HERE\n", .{});
 		try t.expectEqualStrings("1", (try rows.next()).?.get([]const u8, 0).?);
 		try t.expectEqualStrings("12345", (try rows.next()).?.get([]const u8, 0).?);
 		try t.expectEqualStrings("123456789A", (try rows.next()).?.get([]const u8, 0).?);

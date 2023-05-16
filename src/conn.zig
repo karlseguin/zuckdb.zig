@@ -386,4 +386,3 @@ test "queryCache" {
 		try t.expectEqual(@as(i32, 1334), (try rows.next()).?.get(i32, 0).?);
 	}
 }
-
