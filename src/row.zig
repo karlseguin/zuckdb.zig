@@ -358,7 +358,7 @@ const t = std.testing;
 // Test this specifically since there's special handling based on the length
 // of the column (inlined vs pointer)
 test "read varchar" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -394,7 +394,7 @@ test "read varchar" {
 // Test this specifically since there's special handling based on the length
 // of the column (inlined vs pointer)
 test "read blob" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -418,7 +418,7 @@ test "read blob" {
 }
 
 test "read ints" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -481,7 +481,7 @@ test "read ints" {
 }
 
 test "read bool" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -501,7 +501,7 @@ test "read bool" {
 }
 
 test "read float" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -522,7 +522,7 @@ test "read float" {
 }
 
 test "read decimal" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -543,7 +543,7 @@ test "read decimal" {
 }
 
 test "read date & time" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -561,7 +561,7 @@ test "read date & time" {
 }
 
 test "list" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -583,7 +583,7 @@ test "list" {
 }
 
 test "owning row" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();

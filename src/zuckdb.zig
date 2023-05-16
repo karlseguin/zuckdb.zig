@@ -5,6 +5,8 @@ const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
 pub const DB = @import("db.zig").DB;
+pub const Row = @import("row.zig").Row;
+pub const Rows = @import("rows.zig").Rows;
 pub const Conn = @import("conn.zig").Conn;
 pub const Pool = @import("pool.zig").Pool;
 

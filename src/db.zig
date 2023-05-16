@@ -12,11 +12,15 @@ const CONFIG_ALIGNOF = c.config_alignof;
 const DB_SIZEOF = c.database_sizeof;
 const DB_ALIGNOF = c.database_alignof;
 
+pub const Config = struct {
+	enable_external_access: bool = false,
+};
+
 pub const DB = struct{
 	allocator: Allocator,
 	db: *c.duckdb_database,
 
-	pub fn init(allocator: Allocator, path: [*:0]const u8) Result(DB) {
+	pub fn init(allocator: Allocator, path: [*:0]const u8, db_config: Config) Result(DB) {
 		var config_slice = allocator.alignedAlloc(u8, CONFIG_ALIGNOF, CONFIG_SIZEOF) catch |err| {
 			return Result(DB).staticErr(err, "OOM");
 		};
@@ -28,9 +32,13 @@ pub const DB = struct{
 			return Result(DB).staticErr(error.CreateConfig, "error creating database config");
 		}
 
-		// if (c.duckdb_set_config(config, "enable_external_access", "false") == DuckDBError) {
-		//  return error.DBConfigExternal;
-		// }
+		// this is enabled by default, which seems weird to me, so our config has it
+		// disabled by default.
+		if (db_config.enable_external_access == false) {
+			if (c.duckdb_set_config(config.*, "enable_external_access", "false") == DuckDBError) {
+				return Result(DB).staticErr(error.ConfigEA, "could not disable external access");
+			}
+		}
 
 		var db_slice = allocator.alignedAlloc(u8, DB_ALIGNOF, DB_SIZEOF) catch |err| {
 			return Result(DB).staticErr(err, "OOM");
@@ -103,7 +111,7 @@ const Err = struct {
 
 const t = std.testing;
 test "open invalid path" {
-	const res = DB.init(t.allocator, "/tmp/zuckdb.zig/doesnotexist").err;
+	const res = DB.init(t.allocator, "/tmp/zuckdb.zig/doesnotexist", .{}).err;
 	defer res.deinit();
 	try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/zuckdb.zig/doesnotexist\": No such file or directory", res.desc);
 }

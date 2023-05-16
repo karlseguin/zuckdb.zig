@@ -202,7 +202,7 @@ fn bindError(comptime T: type) void {
 
 const t = std.testing;
 test "binding: basic types" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -228,7 +228,7 @@ test "binding: basic types" {
 }
 
 test "binding: int" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -308,7 +308,7 @@ test "binding: int" {
 }
 
 test "binding: floats" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -329,7 +329,7 @@ test "binding: floats" {
 }
 
 test "binding: decimal" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -348,7 +348,7 @@ test "binding: decimal" {
 }
 
 test "binding: uuid" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -366,7 +366,7 @@ test "binding: uuid" {
 }
 
 test "binding: text" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -419,7 +419,7 @@ test "binding: text" {
 }
 
 test "binding: date/time" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -441,7 +441,7 @@ test "binding: date/time" {
 test "query parameters" {
 	const ParameterType = zuckdb.ParameterType;
 
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -512,7 +512,7 @@ test "query parameters" {
 }
 
 test "bindDynamic" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();

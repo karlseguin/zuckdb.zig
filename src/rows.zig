@@ -258,7 +258,7 @@ fn generateContainerColumnData(vector: c.duckdb_vector, column_type: usize) ?Col
 
 const t = std.testing;
 test "query column names" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -273,7 +273,7 @@ test "query column names" {
 }
 
 test "prepare error" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();

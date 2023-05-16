@@ -2,7 +2,7 @@ Zig driver for DuckDB.
 
 # Quick Example
 ```zig
-const db = switch (zuckdb.DB.init(allocator, "/tmp/db.duck")) {
+const db = switch (zuckdb.DB.init(allocator, "/tmp/db.duck", .{})) {
     .ok => |db| db,
     .err => |err| {
         std.debug.print("Failed to open DB: {s}\n", .{err.desc});
@@ -130,7 +130,7 @@ for (0..tags.len) |i| {
 The `zuckdb.Pool` is a thread-safe connection pool:
 
 ```zig
-const db = DB.init(t.allocator, "/tmp/duckdb.zig.test").ok;
+const db = DB.init(t.allocator, "/tmp/duckdb.zig.test", .{}).ok;
 var pool = db.pool(.{
     .size = 2,
     .on_connection = &connInit,

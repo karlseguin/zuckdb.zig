@@ -225,7 +225,7 @@ pub const Conn = struct {
 
 const t = std.testing;
 test "exec error" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -235,7 +235,7 @@ test "exec error" {
 }
 
 test "exec success" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -250,7 +250,7 @@ test "exec success" {
 }
 
 test "query error" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -262,7 +262,7 @@ test "query error" {
 }
 
 test "query select ok" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -281,7 +281,7 @@ test "query select ok" {
 }
 
 test "query empty" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -297,7 +297,7 @@ test "query empty" {
 }
 
 test "query mutate ok" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -320,7 +320,7 @@ test "query mutate ok" {
 }
 
 test "transaction" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	const conn = try db.conn();
@@ -351,8 +351,7 @@ test "transaction" {
 }
 
 test "queryCache" {
-	std.debug.print("HERE\n", .{});
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
 	var conn = try db.conn();
@@ -387,3 +386,4 @@ test "queryCache" {
 		try t.expectEqual(@as(i32, 1334), (try rows.next()).?.get(i32, 0).?);
 	}
 }
+

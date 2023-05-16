@@ -125,7 +125,7 @@ fn poolInitFailCleanup(allocator: Allocator, conns: []Conn, count: usize) void {
 
 const t = std.testing;
 test "Pool" {
-	const db = DB.init(t.allocator, "/tmp/duckdb.zig.test").ok;
+	const db = DB.init(t.allocator, "/tmp/duckdb.zig.test", .{}).ok;
 	var pool = db.pool(.{
 		.size = 2,
 		.on_first_connection = &testPoolFirstConnection,
@@ -147,7 +147,7 @@ test "Pool" {
 }
 
 test "Pool: versioning" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	var pool = db.pool(.{.size = 2,}).ok;
 	defer pool.deinit();
 
@@ -161,7 +161,7 @@ test "Pool: versioning" {
 }
 
 test "Pool: conn version management" {
-	const db = DB.init(t.allocator, ":memory:").ok;
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	var pool = db.pool(.{.size = 2,}).ok;
 	defer pool.deinit();
 
