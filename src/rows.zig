@@ -49,14 +49,10 @@ pub const Rows = struct {
 	// the type of each column, this is loaded once on init
 	column_types: []c.duckdb_type = undefined,
 
-	column_provider: ?ColumnProvider,
-
 	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Result(Rows) {
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
 		const column_count = c.duckdb_column_count(result);
-
-
 		if (chunk_count == 0) {
 			// no chunk, we don't need to load everything else
 			return .{.ok = .{
@@ -65,24 +61,45 @@ pub const Rows = struct {
 				.chunk_count = 0,
 				.allocator = allocator,
 				.column_count = column_count,
-				.column_provider = null,
 			}};
 		}
+
+		const column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
+			return Result(Rows).allocErr(err, .{
+				.stmt = if (stmt != null) stmt.?.stmt else null,
+				.result = result,
+			});
+		};
+
+		for (0..column_count) |i| {
+			column_types[i] = c.duckdb_column_type(result, i);
+		}
+
+		const columns = allocator.alloc(ColumnData, column_count) catch |err| {
+			return Result(Rows).allocErr(err, .{
+				.stmt = if (stmt != null) stmt.?.stmt else null,
+				.result = result,
+			});
+		};
 
 		return .{.ok = .{
 			.stmt = stmt,
 			.result = result,
+			.columns = columns,
 			.allocator = allocator,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
-			.column_provider = null,
+			.column_types = column_types,
 		}};
 	}
 
 	pub fn deinit(self: Rows) void {
 		const allocator = self.allocator;
-		if (self.column_provider) |cp| {
-			cp.deinit(allocator);
+
+		if (self.chunk_count != 0) {
+			// these are only allocated if we have data
+			allocator.free(self.columns);
+			allocator.free(self.column_types);
 		}
 
 		const result = self.result;
@@ -107,28 +124,6 @@ pub const Rows = struct {
 	}
 
 	pub fn next(self: *Rows) !?Row {
-		if (self.column_provider == null) {
-			const result = self.result;
-			const column_count = self.column_count;
-
-			self.column_provider = try ColumnProvider.init(self.allocator, column_count);
-			switch (self.column_provider.?) {
-				.static => |*s| {
-					self.columns = s.columns[0..column_count];
-					self.column_types = s.column_types[0..column_count];
-				},
-				.dynamic => |d| {
-					self.columns = d.columns;
-					self.column_types = d.column_types;
-				},
-			}
-
-			var column_types = self.column_types;
-			for (0..column_count) |i| {
-				column_types[i] = c.duckdb_column_type(result, i);
-			}
-		}
-
 		var row_index = self.row_index;
 		if (row_index == self.row_count) {
 			if (try self.loadNextChunk() == false) {
@@ -203,48 +198,6 @@ pub const Rows = struct {
 		}
 		unreachable;
 	}
-};
-
-const ColumnProvider = union(enum) {
-	static: StaticProvider,
-	dynamic: DynamicProvider,
-
-	fn init(allocator: Allocator, count: usize) !ColumnProvider {
-		switch (count) {
-			0 => unreachable,
-			1...10 => return .{.static = StaticProvider{}},
-			else => return .{.dynamic = try DynamicProvider.init(allocator, count)},
-		}
-	}
-
-	pub fn deinit(self: ColumnProvider, allocator: Allocator) void {
-		switch (self) {
-			.static => {},
-			.dynamic => |dyn| dyn.deinit(allocator),
-		}
-	}
-
-	const DynamicProvider = struct{
-		columns: []ColumnData = undefined,
-		column_types: []c.duckdb_type = undefined,
-
-		fn init(allocator: Allocator, count: usize) !DynamicProvider {
-			return .{
-				.columns = try allocator.alloc(ColumnData, count),
-				.column_types = try allocator.alloc(c.duckdb_type, count),
-			};
-		}
-
-		fn deinit(self: DynamicProvider, allocator: Allocator) void {
-			allocator.free(self.columns);
-			allocator.free(self.column_types);
-		}
-	};
-
-	const StaticProvider = struct{
-		columns: [10]ColumnData = undefined,
-		column_types: [10]c.duckdb_type = undefined,
-	};
 };
 
 fn generateScalarColumnData(vector: c.duckdb_vector, column_type: usize) ?ColumnData.Scalar {
