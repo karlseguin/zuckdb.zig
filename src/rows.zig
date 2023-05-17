@@ -49,7 +49,9 @@ pub const Rows = struct {
 	// the type of each column, this is loaded once on init
 	column_types: []c.duckdb_type = undefined,
 
-	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Result(Rows) {
+	own_state: bool,
+
+	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result, state: anytype) Result(Rows) {
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
 		const column_count = c.duckdb_column_count(result);
@@ -61,32 +63,44 @@ pub const Rows = struct {
 				.chunk_count = 0,
 				.allocator = allocator,
 				.column_count = column_count,
+				.own_state = false,
 			}};
 		}
 
-		const column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
-			return Result(Rows).allocErr(err, .{
-				.stmt = if (stmt != null) stmt.?.stmt else null,
-				.result = result,
-			});
-		};
+		var own_state = false;
+		var columns: []ColumnData = undefined;
+		var column_types: []c.duckdb_type = undefined;
+
+		if (@TypeOf(state) == @TypeOf(null)) {
+			own_state = true;
+			columns = allocator.alloc(ColumnData, column_count) catch |err| {
+				return Result(Rows).allocErr(err, .{
+					.stmt = if (stmt != null) stmt.?.stmt else null,
+					.result = result,
+				});
+			};
+
+			column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
+				return Result(Rows).allocErr(err, .{
+					.stmt = if (stmt != null) stmt.?.stmt else null,
+					.result = result,
+				});
+			};
+		} else {
+			columns = try state.getColumns(column_count);
+			column_types = try state.getColumnTypes(column_count);
+		}
 
 		for (0..column_count) |i| {
 			column_types[i] = c.duckdb_column_type(result, i);
 		}
-
-		const columns = allocator.alloc(ColumnData, column_count) catch |err| {
-			return Result(Rows).allocErr(err, .{
-				.stmt = if (stmt != null) stmt.?.stmt else null,
-				.result = result,
-			});
-		};
 
 		return .{.ok = .{
 			.stmt = stmt,
 			.result = result,
 			.columns = columns,
 			.allocator = allocator,
+			.own_state = own_state,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
 			.column_types = column_types,
@@ -96,8 +110,7 @@ pub const Rows = struct {
 	pub fn deinit(self: Rows) void {
 		const allocator = self.allocator;
 
-		if (self.chunk_count != 0) {
-			// these are only allocated if we have data
+		if (self.own_state) {
 			allocator.free(self.columns);
 			allocator.free(self.column_types);
 		}

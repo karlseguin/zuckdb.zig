@@ -152,3 +152,13 @@ The `on_connection` and `on_first_connection` are optional callbacks. They both 
 
 If both are specific, the first initialized connection will first be passed to `on_first_connection` and then to `on_connection`.
 
+# Query Optimizations
+In very tight loops, performance might be improved by providing a stack-based state for the query logic to use. The `query`, `queryZ`, `row`, `rowZ`, `queryCache` and `queryCacheZ` functions all have a `WithState` alternative, e.g.: `queryZWithState`. These functions take 1 additional "query state" parameter:
+
+```zig
+var state = zuckdb.StaticState(2){};
+var query_result = conn.queryCacheWithState(SQL, .{ARGS}, &state);
+// use query_result normally
+```
+
+The value passed to `zuckdb.StaticState` is the number of columns returned by the query. The `state` must remain valid while the query is used.

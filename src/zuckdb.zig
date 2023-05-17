@@ -3,7 +3,6 @@ const c = @cImport(@cInclude("zuckdb.h"));
 
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
-
 pub const DB = @import("db.zig").DB;
 pub const Row = @import("row.zig").Row;
 pub const Rows = @import("rows.zig").Rows;
@@ -41,6 +40,27 @@ pub const ParameterType = enum {
 		return std.json.encodeJsonString(@tagName(self), options, out);
 	}
 };
+
+
+pub fn StaticState(comptime N: usize) type {
+	const ColumnData = @import("column_data.zig").ColumnData;
+	return struct {
+		columns: [N]ColumnData = undefined,
+		column_types: [N]c.duckdb_type = undefined,
+
+		const Self = @This();
+
+		pub fn getColumns(self: *Self, count: usize) ![]ColumnData {
+			std.debug.assert(count == N);
+			return self.columns[0..count];
+		}
+
+		pub fn getColumnTypes(self: *Self, count: usize) ![]c.duckdb_type {
+			std.debug.assert(count == N);
+			return self.column_types[0..count];
+		}
+	};
+}
 
 const t = std.testing;
 test {

@@ -41,15 +41,15 @@ pub const Stmt = struct {
 		_ = try bindValue(@TypeOf(value), self.stmt.*, value, i+1);
 	}
 
-	pub fn execute(self: Stmt) Result(Rows) {
-		return self.executeReleaseable(true);
+	pub fn execute(self: Stmt, state: anytype) Result(Rows) {
+		return self.executeReleaseable(true, state);
 	}
 
 	// When releasable == true, calling deinit on the result (or the result rows
 	// or error) will deinit the statement.
 	// When releaseable == false, deinit is not called on the statement. This is
 	// meant for cached statements executed via conn.queryCache
-	pub fn executeReleaseable(self: Stmt, releaseable: bool) Result(Rows) {
+	pub fn executeReleaseable(self: Stmt, releaseable: bool, state: anytype) Result(Rows) {
 		const stmt = self.stmt;
 		const allocator = self.allocator;
 		var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
@@ -60,7 +60,7 @@ pub const Stmt = struct {
 		if (c.duckdb_execute_prepared(stmt.*, result) == DuckDBError) {
 			return Result(Rows).resultErr(allocator, if (releaseable) stmt else null, result);
 		}
-		return Rows.init(allocator, if (releaseable) self else null, result);
+		return Rows.init(allocator, if (releaseable) self else null, result, state);
 	}
 
 	pub fn numberOfParameters(self: Stmt) usize {
@@ -524,7 +524,7 @@ test "bindDynamic" {
 	try stmt.bindDynamic(1, "over");
 	try stmt.bindDynamic(2, 9000);
 
-	var rows = stmt.execute().ok;
+	var rows = stmt.execute(null).ok;
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;

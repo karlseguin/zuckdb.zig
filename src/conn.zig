@@ -79,14 +79,22 @@ pub const Conn = struct {
 	}
 
 	pub fn query(self: Conn, sql: []const u8, values: anytype) Result(Rows) {
+		return self.queryWithState(sql, values, null);
+	}
+
+	pub fn queryZ(self: Conn, sql: [:0]const u8, values: anytype) Result(Rows) {
+		return self.queryZWithState(sql, values, null);
+	}
+
+	pub fn queryWithState(self: Conn, sql: []const u8, values: anytype, state: anytype) Result(Rows) {
 		const zql = self.allocator.dupeZ(u8, sql) catch |err| {
 			return Result(Rows).allocErr(err, .{});
 		};
 		defer self.allocator.free(zql);
-		return self.queryZ(zql, values);
+		return self.queryZWithState(zql, values, state);
 	}
 
-	pub fn queryZ(self: Conn, sql: [:0]const u8, values: anytype) Result(Rows) {
+	pub fn queryZWithState(self: Conn, sql: [:0]const u8, values: anytype, state: anytype) Result(Rows) {
 		if (values.len == 0) {
 				const allocator = self.allocator;
 				var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
@@ -96,7 +104,7 @@ pub const Conn = struct {
 			if (c.duckdb_query(self.conn.*, sql, result) == DuckDBError) {
 				return Result(Rows).resultErr(allocator, null, result);
 			}
-			return Rows.init(allocator, null, result);
+			return Rows.init(allocator, null, result, state);
 		}
 
 		const prepare_result = self.prepareZ(sql);
@@ -113,17 +121,25 @@ pub const Conn = struct {
 				.allocator = self.allocator,
 			}};
 		};
-		return stmt.execute();
+		return stmt.execute(state);
 	}
 
 	pub fn row(self: Conn, sql: []const u8, values: anytype) !?OwningRow {
-		const zql = try self.allocator.dupeZ(u8, sql);
-		defer self.allocator.free(zql);
-		return self.rowZ(zql, values);
+		return self.rowWithState(sql, values, null);
 	}
 
 	pub fn rowZ(self: Conn, sql: [:0]const u8, values: anytype) !?OwningRow {
-		const query_result = self.queryZ(sql, values);
+		return self.rowZWithState(sql, values, null);
+	}
+
+	pub fn rowWithState(self: Conn, sql: []const u8, values: anytype, state: anytype) !?OwningRow {
+		const zql = try self.allocator.dupeZ(u8, sql);
+		defer self.allocator.free(zql);
+		return self.rowZWithState(zql, values, state);
+	}
+
+	pub fn rowZWithState(self: Conn, sql: [:0]const u8, values: anytype, state: anytype) !?OwningRow {
+		const query_result = self.queryZWithState(sql, values, state);
 		errdefer query_result.deinit();
 		var rows = switch (query_result) {
 			.ok => |rows| rows,
@@ -168,14 +184,22 @@ pub const Conn = struct {
 	}
 
 	pub fn queryCache(self: *Conn, name: []const u8, sql: []const u8, values: anytype) Result(Rows) {
+		return self.queryCacheWithState(name, sql, values, null);
+	}
+
+	pub fn queryCacheZ(self: *Conn, name: []const u8, sql: [:0]const u8, values: anytype) Result(Rows) {
+		return self.queryCacheZWithState(name, sql, values, null);
+	}
+
+	pub fn queryCacheWithState(self: *Conn, name: []const u8, sql: []const u8, values: anytype, state: anytype) Result(Rows) {
 		const zql = self.allocator.dupeZ(u8, sql) catch |err| {
 			return Result(Rows).allocErr(err, .{});
 		};
 		defer self.allocator.free(zql);
-		return self.queryCacheZ(name, zql, values);
+		return self.queryCacheZWithState(name, zql, values, state);
 	}
 
-	pub fn queryCacheZ(self: *Conn, name: []const u8, sql: [:0]const u8, values: anytype) Result(Rows) {
+	pub fn queryCacheZWithState(self: *Conn, name: []const u8, sql: [:0]const u8, values: anytype, state: anytype) Result(Rows) {
 		const allocator = self.allocator;
 
 		var stmt: Stmt = undefined;
@@ -205,7 +229,7 @@ pub const Conn = struct {
 			}};
 		};
 
-		return stmt.executeReleaseable(false);
+		return stmt.executeReleaseable(false, state);
 	}
 
 	pub fn clearStatementCache(self: Conn) void {
@@ -385,4 +409,19 @@ test "queryCache" {
 		defer rows.deinit();
 		try t.expectEqual(@as(i32, 1334), (try rows.next()).?.get(i32, 0).?);
 	}
+}
+
+test "query with explicit state" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	var state = @import("zuckdb.zig").StaticState(2){};
+	var rows = conn.queryCacheWithState("q1", "select $1::int, $2::varchar", .{9392, "teg"}, &state).ok;
+	defer rows.deinit();
+	const row = (try rows.next()).?;
+	try t.expectEqual(@as(i32, 9392), row.get(i32, 0).?);
+	try t.expectEqualStrings("teg", row.get([]u8, 1).?);
 }
