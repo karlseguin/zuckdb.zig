@@ -21,13 +21,26 @@ const Date = zuckdb.Date;
 const Interval = zuckdb.Interval;
 
 pub const Stmt = struct {
+	cached: bool,
 	allocator: Allocator,
 	stmt: *c.duckdb_prepared_statement,
 
+	pub fn init(allocator: Allocator, stmt: *c.duckdb_prepared_statement, cached: bool) Stmt {
+		return .{
+			.stmt = stmt,
+			.cached = cached,
+			.allocator = allocator,
+		};
+	}
+
 	pub fn deinit(self: Stmt) void {
 		const stmt = self.stmt;
-		c.duckdb_destroy_prepare(stmt);
-		self.allocator.free(@ptrCast([*]u8, stmt)[0..STATEMENT_SIZEOF]);
+		if (self.cached) {
+			_ = c.duckdb_clear_bindings(stmt.*);
+		} else {
+			c.duckdb_destroy_prepare(stmt);
+			self.allocator.free(@ptrCast([*]u8, stmt)[0..STATEMENT_SIZEOF]);
+		}
 	}
 
 	pub fn bind(self: Stmt, values: anytype) !void {
@@ -42,25 +55,16 @@ pub const Stmt = struct {
 	}
 
 	pub fn execute(self: Stmt, state: anytype) Result(Rows) {
-		return self.executeReleaseable(true, state);
-	}
-
-	// When releasable == true, calling deinit on the result (or the result rows
-	// or error) will deinit the statement.
-	// When releaseable == false, deinit is not called on the statement. This is
-	// meant for cached statements executed via conn.queryCache
-	pub fn executeReleaseable(self: Stmt, releaseable: bool, state: anytype) Result(Rows) {
-		const stmt = self.stmt;
 		const allocator = self.allocator;
 		var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
-			return Result(Rows).allocErr(err, .{.stmt = if (releaseable) stmt else null});
+			return Result(Rows).allocErr(err, .{.stmt = self});
 		};
 
 		const result = @ptrCast(*c.duckdb_result, slice.ptr);
-		if (c.duckdb_execute_prepared(stmt.*, result) == DuckDBError) {
-			return Result(Rows).resultErr(allocator, if (releaseable) stmt else null, result);
+		if (c.duckdb_execute_prepared(self.stmt.*, result) == DuckDBError) {
+			return Result(Rows).resultErr(allocator, self, result);
 		}
-		return Rows.init(allocator, if (releaseable) self else null, result, state);
+		return Rows.init(allocator, self, result, state);
 	}
 
 	pub fn numberOfParameters(self: Stmt) usize {

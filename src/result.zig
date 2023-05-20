@@ -1,6 +1,8 @@
 const std = @import("std");
 const c = @cImport(@cInclude("zuckdb.h"));
 
+const Stmt = @import("stmt.zig").Stmt;
+
 const Allocator = std.mem.Allocator;
 
 const RESULT_SIZEOF = c.result_sizeof;
@@ -24,7 +26,7 @@ pub fn Result(comptime T: type) type {
 		}
 
 		const Ownership = struct {
-			stmt: ?*c.duckdb_prepared_statement = null,
+			stmt: ?Stmt = null,
 			result: ?*c.duckdb_result = null,
 		};
 
@@ -36,7 +38,7 @@ pub fn Result(comptime T: type) type {
 			return .{.err = .{.err = err, .desc = desc, .stmt = own.stmt, .result = own.result}};
 		}
 
-		pub fn resultErr(allocator: Allocator, stmt: ?*c.duckdb_prepared_statement, result: *c.duckdb_result) Self {
+		pub fn resultErr(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result) Self {
 			return .{.err = .{
 				.stmt = stmt,
 				.result = result,
@@ -53,7 +55,7 @@ pub const Err = struct {
 	desc: []const u8,
 	allocator: Allocator = undefined,
 	result: ?*c.duckdb_result = null,
-	stmt: ?*c.duckdb_prepared_statement = null,
+	stmt: ?Stmt = null,
 
 	pub fn deinit(self: Err) void {
 		if (self.result) |r| {
@@ -61,8 +63,7 @@ pub const Err = struct {
 			self.allocator.free(@ptrCast([*]u8, r)[0..RESULT_SIZEOF]);
 		}
 		if (self.stmt) |s| {
-			c.duckdb_destroy_prepare(s);
-			self.allocator.free(@ptrCast([*]u8, s)[0..STATEMENT_SIZEOF]);
+			s.deinit();
 		}
 	}
 };

@@ -116,7 +116,7 @@ pub const Conn = struct {
 		stmt.bind(values) catch |err| {
 			return .{.err = .{
 				.err = err,
-				.stmt = stmt.stmt,
+				.stmt = stmt,
 				.desc = "bind error",
 				.allocator = self.allocator,
 			}};
@@ -174,13 +174,13 @@ pub const Conn = struct {
 		if (c.duckdb_prepare(self.conn.*, sql, stmt) == DuckDBError) {
 			return .{.err = .{
 				.err = error.Prepare,
-				.stmt = stmt,
+				.stmt = Stmt.init(allocator, stmt, false),
 				.desc = std.mem.span(c.duckdb_prepare_error(stmt.*)),
 				.allocator = allocator,
 			}};
 		}
 
-		return .{.ok = .{.stmt = stmt, .allocator = allocator}};
+		return .{.ok = Stmt.init(allocator, stmt, false)};
 	}
 
 	pub fn queryCache(self: *Conn, name: []const u8, sql: []const u8, values: anytype) Result(Rows) {
@@ -200,25 +200,11 @@ pub const Conn = struct {
 	}
 
 	pub fn queryCacheZWithState(self: *Conn, name: []const u8, sql: [:0]const u8, values: anytype, state: anytype) Result(Rows) {
-		const allocator = self.allocator;
-
-		var stmt: Stmt = undefined;
-		if (self.stmt_cache.get(name)) |c_stmt| {
-			stmt = Stmt{.allocator = allocator, .stmt = c_stmt};
-		} else {
-			const prepare_result = self.prepareZ(sql);
-			stmt = switch (prepare_result) {
-				.ok => |s| s,
-				.err => |err| return .{.err = err},
-			};
-
-			const owned_name = allocator.dupe(u8, name) catch |err| {
-				return Result(Rows).allocErr(err, .{.stmt = stmt.stmt});
-			};
-			self.stmt_cache.put(owned_name, stmt.stmt) catch |err| {
-				return Result(Rows).allocErr(err, .{.stmt = stmt.stmt});
-			};
-		}
+		const prepare_result = self.prepareCacheZ(name, sql);
+		const stmt = switch (prepare_result) {
+			.ok => |stmt| stmt,
+			.err => |err| return .{.err = err},
+		};
 
 		stmt.bind(values) catch |err| {
 			return .{.err = .{
@@ -229,7 +215,39 @@ pub const Conn = struct {
 			}};
 		};
 
-		return stmt.executeReleaseable(false, state);
+		return stmt.execute(state);
+	}
+
+	pub fn prepareCache(self: *Conn, name: []const u8, sql: []const u8) Result(Stmt) {
+		const zql = self.allocator.dupeZ(u8, sql) catch |err| {
+			return Result(Stmt).allocErr(err, .{});
+		};
+		defer self.allocator.free(zql);
+		return self.prepareCacheZ(name, zql);
+	}
+
+	pub fn prepareCacheZ(self: *Conn, name: []const u8, sql: [:0]const u8) Result(Stmt) {
+		const allocator = self.allocator;
+
+		if (self.stmt_cache.get(name)) |stmt| {
+			return .{.ok = .{.stmt = stmt, .allocator = allocator, .cached = true}};
+		}
+		const prepare_result = self.prepareZ(sql);
+		var stmt = switch (prepare_result) {
+			.ok => |s| s,
+			.err => |err| return .{.err = err},
+		};
+
+		const owned_name = allocator.dupe(u8, name) catch |err| {
+			return Result(Stmt).allocErr(err, .{.stmt = stmt});
+		};
+
+		self.stmt_cache.put(owned_name, stmt.stmt) catch |err| {
+			return Result(Stmt).allocErr(err, .{.stmt = stmt});
+		};
+
+		stmt.cached = true;
+		return .{.ok = stmt};
 	}
 
 	pub fn clearStatementCache(self: Conn) void {

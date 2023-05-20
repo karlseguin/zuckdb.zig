@@ -74,17 +74,11 @@ pub const Rows = struct {
 		if (@TypeOf(state) == @TypeOf(null)) {
 			own_state = true;
 			columns = allocator.alloc(ColumnData, column_count) catch |err| {
-				return Result(Rows).allocErr(err, .{
-					.stmt = if (stmt != null) stmt.?.stmt else null,
-					.result = result,
-				});
+				return Result(Rows).allocErr(err, .{.stmt = stmt, .result = result});
 			};
 
 			column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
-				return Result(Rows).allocErr(err, .{
-					.stmt = if (stmt != null) stmt.?.stmt else null,
-					.result = result,
-				});
+				return Result(Rows).allocErr(err, .{.stmt = stmt, .result = result});
 			};
 		} else {
 			columns = try state.getColumns(column_count);
