@@ -102,6 +102,13 @@ pub const Rows = struct {
 	}
 
 	pub fn deinit(self: Rows) void {
+		self.deinitNoStmt();
+		if (self.stmt) |stmt| {
+			stmt.deinit();
+		}
+	}
+
+	pub fn deinitNoStmt(self: Rows) void {
 		const allocator = self.allocator;
 
 		if (self.own_state) {
@@ -112,10 +119,6 @@ pub const Rows = struct {
 		const result = self.result;
 		c.duckdb_destroy_result(result);
 		allocator.free(@ptrCast([*]u8, result)[0..RESULT_SIZEOF]);
-
-		if (self.stmt) |stmt| {
-			stmt.deinit();
-		}
 	}
 
 	pub fn changed(self: Rows) usize {

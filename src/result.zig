@@ -25,6 +25,12 @@ pub fn Result(comptime T: type) type {
 			}
 		}
 
+		pub fn deinitNoStmt(self: Self) void {
+			switch (self) {
+				inline else => |case| case.deinitNoStmt(),
+			}
+		}
+
 		const Ownership = struct {
 			stmt: ?Stmt = null,
 			result: ?*c.duckdb_result = null,
@@ -58,12 +64,16 @@ pub const Err = struct {
 	stmt: ?Stmt = null,
 
 	pub fn deinit(self: Err) void {
+		self.deinitNoStmt();
+		if (self.stmt) |s| {
+			s.deinit();
+		}
+	}
+
+	pub fn deinitNoStmt(self: Err) void {
 		if (self.result) |r| {
 			c.duckdb_destroy_result(r);
 			self.allocator.free(@ptrCast([*]u8, r)[0..RESULT_SIZEOF]);
-		}
-		if (self.stmt) |s| {
-			s.deinit();
 		}
 	}
 };

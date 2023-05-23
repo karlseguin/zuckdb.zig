@@ -96,6 +96,8 @@ pub const Stmt = struct {
 			17 => .varchar,
 			18 => .blob,
 			19 => .decimal,
+			23 => .@"enum",
+			27 => .uuid,
 			else => .unknown
 		};
 	}

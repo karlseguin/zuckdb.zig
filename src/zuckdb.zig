@@ -8,6 +8,7 @@ pub const Row = @import("row.zig").Row;
 pub const Rows = @import("rows.zig").Rows;
 pub const Conn = @import("conn.zig").Conn;
 pub const Pool = @import("pool.zig").Pool;
+pub const Stmt = @import("stmt.zig").Stmt;
 
 pub const Date = c.duckdb_date_struct;
 pub const Time = c.duckdb_time_struct;
@@ -35,6 +36,8 @@ pub const ParameterType = enum {
 	varchar,
 	blob,
 	decimal,
+	@"enum",
+	uuid,
 
 	pub fn jsonStringify(self: ParameterType, options: std.json.StringifyOptions, out: anytype) !void {
 		return std.json.encodeJsonString(@tagName(self), options, out);

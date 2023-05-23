@@ -230,7 +230,7 @@ pub const Conn = struct {
 		const allocator = self.allocator;
 
 		if (self.stmt_cache.get(name)) |stmt| {
-			return .{.ok = .{.stmt = stmt, .allocator = allocator, .cached = true}};
+			return .{.ok = Stmt.init(allocator, stmt, true)};
 		}
 		const prepare_result = self.prepareZ(sql);
 		var stmt = switch (prepare_result) {
