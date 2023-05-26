@@ -9,6 +9,7 @@ pub const Rows = @import("rows.zig").Rows;
 pub const Conn = @import("conn.zig").Conn;
 pub const Pool = @import("pool.zig").Pool;
 pub const Stmt = @import("stmt.zig").Stmt;
+pub const Err = @import("result.zig").Err;
 
 pub const Date = c.duckdb_date_struct;
 pub const Time = c.duckdb_time_struct;
