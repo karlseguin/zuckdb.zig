@@ -54,17 +54,29 @@ pub const Stmt = struct {
 		_ = try bindValue(@TypeOf(value), self.stmt.*, value, i+1);
 	}
 
-	pub fn execute(self: Stmt, state: anytype) Result(Rows) {
+	pub fn executeOwned(self: Stmt, state: anytype, owned: bool) Result(Rows) {
 		const allocator = self.allocator;
 		var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
-			return Result(Rows).allocErr(err, .{.stmt = self});
+			return Result(Rows).allocErr(err, if (owned) .{.stmt = self} else .{});
 		};
 
 		const result = @ptrCast(*c.duckdb_result, slice.ptr);
 		if (c.duckdb_execute_prepared(self.stmt.*, result) == DuckDBError) {
-			return Result(Rows).resultErr(allocator, self, result);
+			return Result(Rows).resultErr(allocator, if (owned) self else null, result);
 		}
-		return Rows.init(allocator, self, result, state);
+		return Rows.init(allocator, if (owned) self else null, result, state);
+	}
+
+	// When stmt is executed from conn.query or conn.cachedQuery, the application
+	// never iteracts with Stmt directly, and thus the returning rows/error "owns"
+	// the stmt (so they have to call stmt.deinit). conn.query and conn.cachedQuery
+	// call stmt.executeOwned(state, true) to inidicate that the returned rows/err
+	// own the statement.
+	// When stmt is called explicitly, with this function, it is assumed that the
+	// application owns stmt and is responsible for deinit'ing. This happens
+	// when the application explictily calls prepare or prepareCache.
+	pub fn execute(self: Stmt, state: anytype) Result(Rows) {
+		return self.executeOwned(state, false);
 	}
 
 	pub fn numberOfParameters(self: Stmt) usize {
@@ -525,7 +537,7 @@ test "bindDynamic" {
 	defer conn.deinit();
 
 	const stmt = conn.prepareZ("select $1::int, $2::varchar, $3::smallint").ok;
-	errdefer stmt.deinit();
+	defer stmt.deinit();
 	try stmt.bindDynamic(0, null);
 	try stmt.bindDynamic(1, "over");
 	try stmt.bindDynamic(2, 9000);

@@ -121,7 +121,7 @@ pub const Conn = struct {
 				.allocator = self.allocator,
 			}};
 		};
-		return stmt.execute(state);
+		return stmt.executeOwned(state, true);
 	}
 
 	pub fn row(self: Conn, sql: []const u8, values: anytype) !?OwningRow {
@@ -215,7 +215,7 @@ pub const Conn = struct {
 			}};
 		};
 
-		return stmt.execute(state);
+		return stmt.executeOwned(state, true);
 	}
 
 	pub fn prepareCache(self: *Conn, name: []const u8, sql: []const u8) Result(Stmt) {
