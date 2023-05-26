@@ -45,7 +45,6 @@ pub const ParameterType = enum {
 	}
 };
 
-
 pub fn StaticState(comptime N: usize) type {
 	const ColumnData = @import("column_data.zig").ColumnData;
 	return struct {
