@@ -124,36 +124,38 @@ pub const Conn = struct {
 		return stmt.executeOwned(state, true);
 	}
 
-	pub fn row(self: Conn, sql: []const u8, values: anytype) !?OwningRow {
+	pub fn row(self: Conn, sql: []const u8, values: anytype) Result(?OwningRow) {
 		return self.rowWithState(sql, values, null);
 	}
 
-	pub fn rowZ(self: Conn, sql: [:0]const u8, values: anytype) !?OwningRow {
+	pub fn rowZ(self: Conn, sql: [:0]const u8, values: anytype) Result(?OwningRow) {
 		return self.rowZWithState(sql, values, null);
 	}
 
-	pub fn rowWithState(self: Conn, sql: []const u8, values: anytype, state: anytype) !?OwningRow {
-		const zql = try self.allocator.dupeZ(u8, sql);
+	pub fn rowWithState(self: Conn, sql: []const u8, values: anytype, state: anytype) Result(?OwningRow) {
+		const zql = self.allocator.dupeZ(u8, sql) catch |err| {
+			return Result(?OwningRow).allocErr(err, .{});
+		};
 		defer self.allocator.free(zql);
 		return self.rowZWithState(zql, values, state);
 	}
 
-	pub fn rowZWithState(self: Conn, sql: [:0]const u8, values: anytype, state: anytype) !?OwningRow {
+	pub fn rowZWithState(self: Conn, sql: [:0]const u8, values: anytype, state: anytype) Result(?OwningRow) {
 		const query_result = self.queryZWithState(sql, values, state);
-		errdefer query_result.deinit();
 		var rows = switch (query_result) {
 			.ok => |rows| rows,
-			.err => |err| {
-				std.log.err("zuckdb conn.row error: {s}\n", .{err.desc});
-				return err.err;
-			},
+			.err => |err| return .{.err = err},
 		};
 
-		const r = (try rows.next()) orelse {
+		const r = rows.next() catch |err| {
 			query_result.deinit();
-			return null;
+			return Result(?OwningRow).staticErr(err, "Failed to fetch row", .{});
+		} orelse {
+			query_result.deinit();
+			return .{.ok = null};
 		};
-		return .{.row = r, .rows = rows};
+
+		return .{.ok = .{.row = r, .rows = rows}};
 	}
 
 	pub fn prepare(self: *const Conn, sql: []const u8) Result(Stmt) {

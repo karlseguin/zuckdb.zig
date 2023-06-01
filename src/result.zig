@@ -19,15 +19,29 @@ pub fn Result(comptime T: type) type {
 		err: Err,
 
 		const Self = @This();
+
 		pub fn deinit(self: Self) void {
 			switch (self) {
-				inline else => |case| case.deinit(),
+				.ok => |ok| {
+					// better option??
+					if (@typeInfo(T) == .Optional) {
+						if (ok) |okok| okok.deinit();
+					} else {
+						ok.deinit();
+					}
+				},
+				.err => |err| err.deinit(),
 			}
 		}
 
-		pub fn deinitNoStmt(self: Self) void {
-			switch (self) {
-				inline else => |case| case.deinitNoStmt(),
+		pub fn unwrap(self: Self) !T {
+			switch(self) {
+				.ok => |ok| return ok,
+				.err => |err| {
+					defer err.deinit();
+					std.log.err("zuckdb unwrap error: {s}\n", .{err.desc});
+					return err.err;
+				}
 			}
 		}
 
@@ -64,16 +78,13 @@ pub const Err = struct {
 	stmt: ?Stmt = null,
 
 	pub fn deinit(self: Err) void {
-		self.deinitNoStmt();
-		if (self.stmt) |s| {
-			s.deinit();
-		}
-	}
-
-	pub fn deinitNoStmt(self: Err) void {
 		if (self.result) |r| {
 			c.duckdb_destroy_result(r);
 			self.allocator.free(@ptrCast([*]u8, r)[0..RESULT_SIZEOF]);
+		}
+
+		if (self.stmt) |s| {
+			s.deinit();
 		}
 	}
 };

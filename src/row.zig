@@ -592,16 +592,20 @@ test "owning row" {
 
 	{
 		// error case
-		try t.expectError(error.InvalidSQL, conn.row("select x", .{}));
+		const result = conn.row("select x", .{});
+		defer result.deinit();
+		try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", result.err.desc);
 	}
 
 	{
 		// null
-		try t.expectEqual(@as(?OwningRow, null), try conn.row("select 1 where false", .{}));
+		const result = conn.row("select 1 where false", .{});
+		defer result.deinit();
+		try t.expectEqual(@as(?OwningRow, null), result.ok);
 	}
 
 	{
-		const row = (try conn.rowZ("select $1::bigint", .{-991823891832})).?;
+		const row = (try conn.rowZ("select $1::bigint", .{-991823891832}).unwrap()).?;
 		defer row.deinit();
 		try t.expectEqual(@as(i64, -991823891832), row.get(i64, 0).?);
 	}

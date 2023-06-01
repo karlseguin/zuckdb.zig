@@ -3,8 +3,12 @@ const c = @cImport(@cInclude("zuckdb.h"));
 
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
+const row = @import("row.zig");
+
 pub const DB = @import("db.zig").DB;
-pub const Row = @import("row.zig").Row;
+pub const Row = row.Row;
+pub const OwningRow = row.OwningRow;
+
 pub const Rows = @import("rows.zig").Rows;
 pub const Conn = @import("conn.zig").Conn;
 pub const Pool = @import("pool.zig").Pool;
