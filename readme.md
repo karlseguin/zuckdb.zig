@@ -56,9 +56,31 @@ defer conn.deinit();
 }
 ```
 
-`query` and `exec` are the two primary functions used to run queries. The `queryZ` and `execZ` versions are optimized when the 1st parameter (the sql string) is known to be null-terminated (so you should favor using `execZ` or `queryZ` if you have a static SQL string). `exec` and `execZ` does not accept SQL parameters and only returns an `!void` (i.e. no detailed message, no rows), but will run slightly faster.
+When fetching data from a `row`, data is only valid until the next call to `next` or `deinit`:
 
-You'll notice that the library does not use idiomatic error sets, but rather a Rust-like results. This was done so that the error message could be exposed. As a consequence, you'll also notice that `deinit` must be called on BOTH the `ok` and `err` values. There are two options to deal with this. In the above example, `deinit` is called in both cases:
+```zig
+// assume we have rows from a "select name from users";
+
+defer rows.deinit();
+
+// we'll collect the names in here
+const names = std.ArrayList([]const u8).init(allocator);
+
+while (rows.next()) |row| {
+    // name is not null
+    const name = row.get([]u8, 0).?; 
+
+    // we need to dupe the string value to own it beyond this block
+    try names.append(try allocator.dupe(u8, name));
+}
+```
+
+
+## Query and Exec
+
+`query` and `exec` are the two primary functions used to run queries. The `queryZ` and `execZ` versions are optimized when the 1st parameter (the sql string) is known to be null-terminated (so you should favor using `execZ` or `queryZ` if you have a static SQL string). `exec` and `execZ` do not accept SQL parameters and only returns an `!void` (i.e. no detailed message, no rows), but will run slightly faster.
+
+You'll notice that the library does not use idiomatic error sets, but rather Rust-like results. This was done so that the error message could be exposed. As a consequence, you'll also notice that `deinit` must be called on BOTH the `ok` and `err` values. There are two options to deal with this. In the above example, `deinit` is called in both cases:
 
 ```zig
 const rows = switch(conn.query("...", .{})) {
@@ -92,7 +114,16 @@ const rows = switch() {
 // should NOT call rows.deinit()
 ```
 
-The returned rows can be iterated using `next()` which returns a `?Row`. `Row` exposes a `get(T, index) ?T` and `list(T, index) ?[]T` function.
+## Rows and Row
+The `rows` returned from the `ok` case of a `query` exposes the following methods:
+
+* `count()` - the number of rows in the result
+* `changed()` - the number of updated/deleted/inserted rows
+* `columnName(i: usize)` - the column name at position `i` in a result
+
+The most important method on `rows` is `next()` which is used to iterate the results. `next()` is a typical Zig iterator and returns a `?Row` which will be null when no more rows exist to be iterated.
+
+`Row` exposes a `get(T, index) ?T` and `list(T, index) ?[]T` function.
 
 The supported types for `get`, are:
 * `[]u8`, 
@@ -114,9 +145,10 @@ The supported types for `get`, are:
 * `zuckdb.Interval`
 * `zuckdb.UUID`
 
-There are a few important notes. First calling `get` with the wrong type will result in `null` being returned. Second, `get(T, i)` usually returns a `?T`. The only exception to this is `get(u8, i)` which returns a `[]const u8` - I just didn't want to type `get([]const u8)` all the time.
+There are a few important notes. First calling `get` with the wrong type will result in `null` being returned. Second, `get(T, i)` usually returns a `?T`. The only exception to this is `get([]u8, i)` which returns a `[]const u8` - I just didn't want to type `get([]const u8)` all the time.
 
 `row.list(T, i)` is used to fetch a list from duckdb. It returns a type that exposes a `len` and `get(i) ?T` function:
+
 
 ```zig
 const tags = row.list([]u8, 3) orelse unreachable; // TODO handle null properly
