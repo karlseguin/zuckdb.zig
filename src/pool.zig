@@ -38,6 +38,7 @@ pub const Pool = struct {
 				return Result(Pool).staticErr(err, "open connection failure");
 			};
 			init_count += 1;
+			conns[i] = conn;
 			if (i == 0) {
 				if (config.on_first_connection) |f| {
 					f(conn) catch |err| {
@@ -52,7 +53,6 @@ pub const Pool = struct {
 					return Result(Pool).staticErr(err, "on_connection failure");
 				};
 			}
-			conns[i] = conn;
 		}
 
 		return .{.ok = .{
@@ -148,7 +148,7 @@ test "Pool" {
 
 test "Pool: versioning" {
 	const db = DB.init(t.allocator, ":memory:", .{}).ok;
-	var pool = db.pool(.{.size = 2,}).ok;
+	var pool = db.pool(.{.size = 2}).ok;
 	defer pool.deinit();
 
 	try t.expectEqual(@as(u32, 0), pool.version);
