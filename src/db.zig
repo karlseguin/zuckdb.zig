@@ -14,6 +14,13 @@ const DB_ALIGNOF = c.database_alignof;
 
 pub const Config = struct {
 	enable_external_access: bool = true,
+	access_mode: AccessMode = .automatic,
+
+	const AccessMode = enum {
+		automatic,
+		read_only,
+		read_write,
+	};
 };
 
 pub const DB = struct{
@@ -35,6 +42,12 @@ pub const DB = struct{
 		if (db_config.enable_external_access == false) {
 			if (c.duckdb_set_config(config.*, "enable_external_access", "false") == DuckDBError) {
 				return Result(DB).staticErr(error.ConfigEA, "could not disable external access");
+			}
+		}
+
+		if (db_config.access_mode != .automatic) {
+			if (c.duckdb_set_config(config.*, "access_mode", @tagName(db_config.access_mode)) == DuckDBError) {
+				return Result(DB).staticErr(error.ConfigAM, "could not set the access mode");
 			}
 		}
 
