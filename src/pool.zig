@@ -14,6 +14,7 @@ pub const Pool = struct {
 	conns: []Conn,
 	available: usize,
 	allocator: Allocator,
+	shutdown: bool,
 
 	pub const Config = struct {
 		size: usize = 5,
@@ -59,6 +60,7 @@ pub const Pool = struct {
 			.db = db,
 			.conns = conns,
 			.version = 0,
+			.shutdown = false,
 			.available = size,
 			.allocator = allocator,
 			.mutex = std.Thread.Mutex{},
@@ -66,18 +68,40 @@ pub const Pool = struct {
 		}};
 	}
 
-	pub fn deinit(self: *const Pool) void {
+	// blocks until all connections can be safely removed from the pool
+	pub fn deinit(self: *Pool) void {
+		const conns = self.conns;
+		self.mutex.lock();
+		self.shutdown = true;
+		// any thread blocked in acquire() will unblock, check self.shutdown
+		// and return an error
+		self.cond.broadcast();
+
+		while (true) {
+			if (self.available == conns.len) {
+				break;
+			}
+			self.cond.wait(&self.mutex);
+		}
+
+		// Don't need to lock this while we deallocate, as any calls to acquire
+		// will see the shutdown = true;
+		self.mutex.unlock();
+
 		const allocator = self.allocator;
-		for (self.conns) |*conn| {
+		for (conns) |*conn| {
 			conn.deinit();
 		}
 		allocator.free(self.conns);
 		self.db.deinit();
 	}
 
-	pub fn acquire(self: *Pool) Conn {
+	pub fn acquire(self: *Pool) !Conn {
 		self.mutex.lock();
 		while (true) {
+			if (self.shutdown) {
+				return error.PoolShuttingDown;
+			}
 			const conns = self.conns;
 			const available = self.available;
 			if (available == 0) {
@@ -138,7 +162,7 @@ test "Pool" {
 
 	t1.join(); t2.join(); t3.join();
 
-	const c1 = pool.acquire();
+	const c1 = try pool.acquire();
 	defer pool.release(c1);
 
 	const result = c1.queryZ("delete from pool_test", .{});
@@ -166,8 +190,8 @@ test "Pool: conn version management" {
 	defer pool.deinit();
 
 	{
-		const c1 = pool.acquire();
-		const c2 = pool.acquire();
+		const c1 = try pool.acquire();
+		const c2 = try pool.acquire();
 		try t.expectEqual(@as(u32, 0), c1.version);
 		try t.expectEqual(@as(u32, 0), c1.version);
 		pool.release(c1);
@@ -176,8 +200,8 @@ test "Pool: conn version management" {
 
 	{
 		pool.incrementVersion();
-		const c1 = pool.acquire();
-		const c2 = pool.acquire();
+		const c1 = try pool.acquire();
+		const c2 = try pool.acquire();
 		try t.expectEqual(@as(u32, 1), c1.version);
 		try t.expectEqual(@as(u32, 1), c2.version);
 		pool.release(c1);
@@ -186,8 +210,8 @@ test "Pool: conn version management" {
 
 	{
 		pool.incrementVersion();
-		const c1 = pool.acquire();
-		const c2 = pool.acquire();
+		const c1 = try pool.acquire();
+		const c2 = try pool.acquire();
 		try t.expectEqual(@as(u32, 2), c1.version);
 		try t.expectEqual(@as(u32, 2), c2.version);
 		pool.release(c1);
@@ -196,9 +220,9 @@ test "Pool: conn version management" {
 
 	{
 		// c1 acquired before increment
-		const c1 = pool.acquire();
+		const c1 = try pool.acquire();
 		pool.incrementVersion();
-		const c2 = pool.acquire();
+		const c2 = try pool.acquire();
 		try t.expectEqual(@as(u32, 2), c1.version);
 		try t.expectEqual(@as(u32, 3), c2.version);
 		pool.release(c1);
@@ -206,8 +230,8 @@ test "Pool: conn version management" {
 	}
 
 	{
-		const c1 = pool.acquire();
-		const c2 = pool.acquire();
+		const c1 = try pool.acquire();
+		const c2 = try pool.acquire();
 		try t.expectEqual(@as(u32, 3), c1.version);
 		try t.expectEqual(@as(u32, 3), c2.version);
 		pool.release(c1);
@@ -217,7 +241,7 @@ test "Pool: conn version management" {
 
 fn testPool(p: *Pool) void {
 	for (0..2000) |i| {
-		const conn = p.acquire();
+		const conn = p.acquire() catch unreachable;
 		conn.queryZ("insert into pool_test (id) values ($1)", .{i}).ok.deinit();
 		p.release(conn);
 	}
