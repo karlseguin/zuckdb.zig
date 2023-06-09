@@ -445,3 +445,28 @@ test "query with explicit state" {
 	try t.expectEqual(@as(i32, 9392), row.get(i32, 0).?);
 	try t.expectEqualStrings("teg", row.get([]u8, 1).?);
 }
+
+test "constraint errors" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	try conn.execZ("create table t (name varchar not null)");
+	try conn.execZ("create unique index t_name on t (name)");
+	try conn.execZ("insert into t (name) values ('leto')");
+
+	{
+		// not a duplicate error
+		const err = conn.queryZ("create table t (name varchar not null)", .{}).err;
+		defer err.deinit();
+		try t.expectEqual(false, err.isDuplicate());
+	}
+
+	{
+		const err = conn.query("insert into t (name) values ('leto')", .{}).err;
+		defer err.deinit();
+		try t.expectEqual(true, err.isDuplicate());
+	}
+}

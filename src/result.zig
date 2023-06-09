@@ -87,4 +87,9 @@ pub const Err = struct {
 			s.deinit();
 		}
 	}
+
+	pub fn isDuplicate(self: Err) bool {
+		// no better way right nows
+		return std.mem.startsWith(u8, self.desc, "Constraint Error: Duplicate key");
+	}
 };
