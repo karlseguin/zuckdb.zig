@@ -26,7 +26,7 @@ pub const Row = struct {
 		}
 	}
 
-	pub fn list(self: Row, comptime T: type, col: usize) ?List(T) {
+	pub fn list(self: Row, comptime T: type, col: usize) ?List(scalarReturn(T)) {
 		const index = self.index;
 		const column = self.columns[col];
 		if (isNull(column.validity, index)) return null;
@@ -53,7 +53,7 @@ pub const OwningRow = struct {
 		return self.row.get(T, col);
 	}
 
-	pub fn list(self: OwningRow, comptime T: type, col: usize) ?List(T) {
+	pub fn list(self: OwningRow, comptime T: type, col: usize) ?List(scalarReturn(T)) {
 		return self.row.list(T, col);
 	}
 
