@@ -31,7 +31,7 @@ pub const Row = struct {
 		const column = self.columns[col];
 		if (isNull(column.validity, index)) return null;
 
-		switch (column.data)  {
+		switch (column.data) {
 			.container => |container| switch (container) {
 				.list => |vc| {
 					const entry = vc.entries[index];
@@ -339,7 +339,7 @@ pub fn List(comptime T: type) type {
 			};
 		}
 
-		fn get(self: Self, i: usize) ?T {
+		pub fn get(self: Self, i: usize) ?T {
 			const index = i + self._offset;
 			if (isNull(self._validity, index)) return null;
 			return getScalar(T, self._scalar, index);
