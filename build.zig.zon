@@ -1,0 +1,10 @@
+.{
+  .name = "zuckdb",
+  .version = "0.0.0",
+  .dependencies = .{
+    .typed = .{
+      .url = "https://github.com/karlseguin/typed.zig/archive/e7385018b6b42274ca1080f6f54821aa8d0e5e82.tar.gz",
+      .hash = "122052061df9b0c31b2f75033b5c92085e0d5115ab92bc2c4e36a301e07e733a4120"
+    }
+  },
+}

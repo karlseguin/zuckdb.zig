@@ -83,35 +83,12 @@ pub const Stmt = struct {
 		return c.duckdb_nparams(self.stmt.*);
 	}
 
-	pub fn parameterTypeC(self: Stmt, i: usize) usize {
+	pub fn parameterTypeC(self: Stmt, i: usize) c.duckdb_type {
 		return c.duckdb_param_type(self.stmt.*, i+1);
 	}
 
 	pub fn parameterType(self: Stmt, i: usize) zuckdb.ParameterType {
-		return switch (self.parameterTypeC(i)) {
-			1 => .bool,
-			2 => .i8,
-			3 => .i16,
-			4 => .i32,
-			5 => .i64,
-			6 => .u8,
-			7 => .u16,
-			8 => .u32,
-			9 => .u64,
-			10 => .f32,
-			11 => .f64,
-			12 => .timestamp,
-			13 => .date,
-			14 => .time,
-			15 => .interval,
-			16 => .i128,
-			17 => .varchar,
-			18 => .blob,
-			19 => .decimal,
-			23 => .@"enum",
-			27 => .uuid,
-			else => .unknown
-		};
+		return zuckdb.ParameterType.fromDuckDBType(self.parameterTypeC(i));
 	}
 };
 

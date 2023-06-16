@@ -1,4 +1,5 @@
 const std = @import("std");
+const typed = @import("typed");
 const zuckdb = @import("zuckdb.zig");
 const c = @cImport(@cInclude("zuckdb.h"));
 
@@ -10,6 +11,9 @@ const UUID = zuckdb.UUID;
 const Time = zuckdb.Time;
 const Date = zuckdb.Date;
 const Interval = zuckdb.Interval;
+const ParameterType = zuckdb.ParameterType;
+
+const Allocator = std.mem.Allocator;
 
 pub const Row = struct {
 	index: usize,
@@ -41,6 +45,77 @@ pub const Row = struct {
 			else => return null,
 		}
 	}
+
+	pub fn toMap(self: Row, builder: *MapBuilder) !typed.Map {
+		const types = builder.types;
+
+		var aa = builder.arena.allocator();
+		var map = typed.Map.init(aa);
+		try map.ensureTotalCapacity(@intCast(u32, types.len));
+		errdefer map.deinit();
+
+		for (types, builder.names, 0..) |tpe, name, i| {
+			switch (tpe) {
+				.varchar, .blob => {
+					if (self.get([]u8, i)) |value| {
+						map.putAssumeCapacity(name, try aa.dupe(u8, value));
+					} else {
+						map.putAssumeCapacity(name, null);
+					}
+				},
+				.bool => map.putAssumeCapacity(name, self.get(bool, i)),
+				.i8 => map.putAssumeCapacity(name, self.get(i8, i)),
+				.i16 => map.putAssumeCapacity(name, self.get(i16, i)),
+				.i32 => map.putAssumeCapacity(name, self.get(i32, i)),
+				.i64 => map.putAssumeCapacity(name, self.get(i64, i)),
+				.u8 => map.putAssumeCapacity(name, self.get(u8, i)),
+				.u16 => map.putAssumeCapacity(name, self.get(u16, i)),
+				.u32 => map.putAssumeCapacity(name, self.get(u32, i)),
+				.u64 => map.putAssumeCapacity(name, self.get(u64, i)),
+				.f32 => map.putAssumeCapacity(name, self.get(f32, i)),
+				.f64, .decimal => map.putAssumeCapacity(name, self.get(f64, i)),
+				.i128 => map.putAssumeCapacity(name, self.get(i128, i)),
+				.uuid => {
+					if (self.get(zuckdb.UUID, i)) |uuid| {
+						map.putAssumeCapacity(name, try aa.dupe(u8, &uuid));
+					} else {
+						map.putAssumeCapacity(name, null);
+					}
+				},
+				.date => {
+					if (self.get(zuckdb.Date, i)) |date| {
+						map.putAssumeCapacity(name, typed.Date{
+							.year = @intCast(i16, date.year),
+							.month = @intCast(u8, date.month),
+							.day = @intCast(u8, date.day),
+						});
+					} else {
+						map.putAssumeCapacity(name, null);
+					}
+				},
+				.time => {
+					if (self.get(zuckdb.Time, i)) |time| {
+						map.putAssumeCapacity(name, typed.Time{
+							.hour = @intCast(u8, time.hour),
+							.min =  @intCast(u8, time.min),
+							.sec =  @intCast(u8, time.sec),
+						});
+					} else {
+						map.putAssumeCapacity(name, null);
+					}
+				},
+				.timestamp => {
+					if (self.get(i64, i)) |micros| {
+						map.putAssumeCapacity(name, typed.Timestamp{.micros = micros});
+					} else {
+						map.putAssumeCapacity(name, null);
+					}
+				},
+				else => return error.UnsupportedMapType,
+			}
+		}
+		return map;
+	}
 };
 
 // Returned by conn.row / rowZ, wraps a row and rows, the latter so that
@@ -59,6 +134,24 @@ pub const OwningRow = struct {
 
 	pub fn deinit(self: OwningRow) void {
 		self.rows.deinit();
+	}
+
+	pub fn mapBuilder(self: OwningRow, allocator: Allocator) !MapBuilder {
+		return try self.rows.mapBuilder(allocator);
+	}
+
+	pub fn toMap(self: OwningRow, builder: *MapBuilder) !typed.Map {
+		return self.row.toMap(builder);
+	}
+};
+
+pub const MapBuilder = struct {
+	arena: std.heap.ArenaAllocator,
+	types: []ParameterType,
+	names: [][]const u8,
+
+	pub fn deinit(self: MapBuilder) void {
+		self.arena.deinit();
 	}
 };
 
@@ -607,5 +700,96 @@ test "owning row" {
 		const row = (try conn.rowZ("select $1::bigint", .{-991823891832}).unwrap()).?;
 		defer row.deinit();
 		try t.expectEqual(@as(i64, -991823891832), row.get(i64, 0).?);
+	}
+}
+
+test "row: toMap" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		var rows = conn.queryZ(
+			\\ select true as the_truth, false as not_the_truth, null::bool as n_truth,
+			\\
+			\\   32.329::real as a, -0.29291::double as b, null::real as c, null::double as d,
+			\\
+			\\   127::tinyint as ti, -32767::smallint as si, 2147483647::integer as nn,
+			\\   9223372036854775807::bigint as bi,
+			\\   170141183460469231731687303715884105727::hugeint as hugn,
+			\\
+			\\   255::utinyint as uti, 65535::usmallint as usi, 4294967295::uinteger as unn,
+			\\   18446744073709551615::ubigint as ubi,
+			\\
+			\\   null::tinyint as nti, null::smallint as nsi, null::integer as nnn,
+			\\   null::bigint as nbi, null::hugeint as nhubn,
+			\\
+			\\   null::utinyint as nuti, null::usmallint as nusi, null::uinteger as nunn, null::ubigint as nubi,
+			\\
+			\\   '790162b2-8a73-4cd7-9be8-acc7475655d6'::uuid as col_uuid, null::uuid as zz,
+			\\
+			\\   'over 9000' as power, null::varchar as null_power,
+			\\
+			\\   '2023-06-19'::date as dte, null::date as ndate,
+			\\
+			\\   '23:03:45'::time as tme, null::time as ntme,
+			\\
+			\\   '2023-06-18 22:24:42.123Z'::timestamp as tz, null::timestamp as ntz
+		, .{}).ok;
+		defer rows.deinit();
+
+		var mp = try rows.mapBuilder(t.allocator);
+		defer mp.deinit();
+
+		var row = (try rows.next()).?;
+		var m = try row.toMap(&mp);
+
+		try t.expectEqual(true, m.get(bool, "the_truth").?);
+		try t.expectEqual(false, m.get(bool, "not_the_truth").?);
+		try t.expectEqual(@as(?bool, null), m.get(bool, "n_truth"));
+
+		try t.expectEqual(@as(f32, 32.329), m.get(f32, "a").?);
+		try t.expectEqual(@as(f64, -0.29291), m.get(f64, "b").?);
+		try t.expectEqual(@as(?f32, null), m.get(f32, "c"));
+		try t.expectEqual(@as(?f64, null), m.get(f64, "d"));
+
+		try t.expectEqual(@as(i8, 127), m.get(i8, "ti").?);
+		try t.expectEqual(@as(i16, -32767), m.get(i16, "si").?);
+		try t.expectEqual(@as(i32, 2147483647), m.get(i32, "nn").?);
+		try t.expectEqual(@as(i64, 9223372036854775807), m.get(i64, "bi").?);
+		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), m.get(i128, "hugn").?);
+
+		try t.expectEqual(@as(u8, 255), m.get(u8, "uti").?);
+		try t.expectEqual(@as(u16, 65535), m.get(u16, "usi").?);
+		try t.expectEqual(@as(u32, 4294967295), m.get(u32, "unn").?);
+		try t.expectEqual(@as(u64, 18446744073709551615), m.get(u64, "ubi").?);
+
+		try t.expectEqual(@as(?i8, null), m.get(i8, "nti"));
+		try t.expectEqual(@as(?i16, null), m.get(i16, "nsi"));
+		try t.expectEqual(@as(?i32, null), m.get(i32, "nnn"));
+		try t.expectEqual(@as(?i64, null), m.get(i64, "nbi"));
+		try t.expectEqual(@as(?i128, null), m.get(i128, "nhugn"));
+
+		try t.expectEqual(@as(?u8, null), m.get(u8, "nuti"));
+		try t.expectEqual(@as(?u16, null), m.get(u16, "nusi"));
+		try t.expectEqual(@as(?u32, null), m.get(u32, "nunn"));
+		try t.expectEqual(@as(?u64, null), m.get(u64, "nubi"));
+
+		try t.expectEqualStrings("790162b2-8a73-4cd7-9be8-acc7475655d6", m.get([]u8, "col_uuid").?);
+		try t.expectEqual(@as(?[]const u8, null), m.get([]u8, "zz"));
+
+		try t.expectEqualStrings("over 9000", m.get([]u8, "power").?);
+		try t.expectEqual(@as(?[]const u8, null), m.get([]u8, "null_power"));
+
+		try t.expectEqual(try typed.Date.parse("2023-06-19"), m.get(typed.Date, "dte").?);
+		try t.expectEqual(@as(?typed.Date, null), m.get(typed.Date, "ndate"));
+
+		try t.expectEqual(try typed.Time.parse("23:03:45"), m.get(typed.Time, "tme").?);
+		try t.expectEqual(@as(?typed.Time, null), m.get(typed.Time, "ntme"));
+
+		try t.expectEqual(@as(i64, 1687127082123000), m.get(typed.Timestamp, "tz").?.micros);
+		try t.expectEqual(@as(?typed.Timestamp, null), m.get(typed.Timestamp, "ntz"));
 	}
 }

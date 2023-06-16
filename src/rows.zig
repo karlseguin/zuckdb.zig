@@ -1,8 +1,13 @@
 const std = @import("std");
+const zuckdb = @import("zuckdb.zig");
 const c = @cImport(@cInclude("zuckdb.h"));
 
+const row = @import("row.zig");
+const Row = row.Row;
+const MapBuilder = row.MapBuilder;
+const ParameterType = zuckdb.ParameterType;
+
 const DB = @import("db.zig").DB;
-const Row = @import("row.zig").Row;
 const Stmt = @import("stmt.zig").Stmt;
 const Result = @import("result.zig").Result;
 const ColumnData = @import("column_data.zig").ColumnData;
@@ -128,6 +133,32 @@ pub const Rows = struct {
 
 	pub fn columnName(self: Rows, i: usize) [*c]const u8 {
 		return c.duckdb_column_name(self.result, i);
+	}
+
+	pub fn columnType(self: Rows, i: usize) zuckdb.ParameterType {
+		return zuckdb.ParameterType.fromDuckDBType(self.column_types[i]);
+	}
+
+	pub fn mapBuilder(self: Rows, allocator: Allocator) !MapBuilder {
+		const column_count = self.column_count;
+
+		var arena = std.heap.ArenaAllocator.init(allocator);
+		errdefer arena.deinit();
+
+		const aa = arena.allocator();
+		var types = try aa.alloc(ParameterType, column_count);
+		var names = try aa.alloc([]const u8, column_count);
+
+		for (self.column_types, 0..) |ctype, i| {
+			types[i] = ParameterType.fromDuckDBType(ctype);
+			names[i] = try aa.dupe(u8, std.mem.span(self.columnName(i)));
+		}
+
+		return .{
+			.types = types,
+			.names = names,
+			.arena = arena,
+		};
 	}
 
 	pub fn next(self: *Rows) !?Row {
