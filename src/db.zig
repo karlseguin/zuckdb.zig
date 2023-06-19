@@ -27,7 +27,15 @@ pub const DB = struct{
 	allocator: Allocator,
 	db: *c.duckdb_database,
 
-	pub fn init(allocator: Allocator, path: [*:0]const u8, db_config: Config) Result(DB) {
+	pub fn init(allocator: Allocator, path: []const u8, db_config: Config) Result(DB) {
+		const zpath = allocator.dupeZ(u8, path) catch |err| {
+			return Result(DB).staticErr(err, "OOM");
+		};
+		defer allocator.free(zpath);
+		return DB.initZ(allocator, zpath, db_config);
+	}
+
+	pub fn initZ(allocator: Allocator, path: [*:0]const u8, db_config: Config) Result(DB) {
 		var config_slice = allocator.alignedAlloc(u8, CONFIG_ALIGNOF, CONFIG_SIZEOF) catch |err| {
 			return Result(DB).staticErr(err, "OOM");
 		};
