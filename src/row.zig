@@ -871,4 +871,3 @@ test "row: toMap" {
 		try t.expectEqual(@as(?typed.Timestamp, null), m.get(typed.Timestamp, "ntz"));
 	}
 }
-

@@ -178,7 +178,7 @@ fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_u
 
 fn bindByteArray(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
 	switch (c.duckdb_param_type(stmt, bind_index)) {
-		c.DUCKDB_TYPE_VARCHAR => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
+		c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
 		c.DUCKDB_TYPE_UUID => {
 			if (len != 36) return DuckDBError;
@@ -431,6 +431,24 @@ test "binding: date/time" {
 	try t.expectEqual(time, row.get(Time, 1).?);
 	try t.expectEqual(@as(i64, 751203002000000), row.get(i64, 2).?);
 	try t.expectEqual(interval, row.get(Interval, 3).?);
+}
+
+test "binding: enum" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	conn.execZ("create type my_type as enum ('type_a', 'type_b')") catch unreachable;
+	conn.execZ("create type tea_type as enum ('keemun', 'silver_needle')") catch unreachable;
+
+	var rows = conn.queryZ("select $1::my_type, $2::tea_type, $3::my_type", .{"type_a", "keemun", null}).ok;
+	defer rows.deinit();
+	const row = (try rows.next()).?;
+	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
+	try t.expectEqualStrings("keemun", (try row.getEnum(1)).?);
+	try t.expectEqual(@as(?[]const u8, null), try row.getEnum(2));
 }
 
 test "query parameters" {
