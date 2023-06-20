@@ -470,3 +470,21 @@ test "constraint errors" {
 		try t.expectEqual(true, err.isDuplicate());
 	}
 }
+
+test "prepare error" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	const stmt = conn.prepare("select x");
+	defer stmt.deinit();
+
+	switch (stmt) {
+		.ok => unreachable,
+		.err => |err| {
+			try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", err.desc);
+		}
+	}
+}

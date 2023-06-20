@@ -1,5 +1,7 @@
 const c = @cImport(@cInclude("zuckdb.h"));
 
+const Rows = @import("rows.zig").Rows;
+
 // DuckDB exposes data as "vectors", which is essentially a pointer to memory
 // that holds data based on the column type (a vector is data for a column, not
 // a row). Our ColumnData is a typed wrapper to the (a) data and (b) the validity
@@ -38,6 +40,7 @@ pub const ColumnData = struct {
 
 	pub const Container = union(enum) {
 		list: ColumnData.List,
+		@"enum": ColumnData.Enum,
 	};
 
 	pub const Decimal = struct {
@@ -57,5 +60,11 @@ pub const ColumnData = struct {
 		child: Scalar,
 		validity: [*c]u64,
 		entries: [*]c.duckdb_list_entry,
+	};
+
+	pub const Enum = struct {
+		rows: *Rows,
+		internal: Scalar,
+		logical_type: c.duckdb_logical_type,
 	};
 };

@@ -30,7 +30,7 @@ pub const Row = struct {
 		}
 	}
 
-	pub fn list(self: Row, comptime T: type, col: usize) ?List(scalarReturn(T)) {
+	pub fn getList(self: Row, comptime T: type, col: usize) ?List(scalarReturn(T)) {
 		const index = self.index;
 		const column = self.columns[col];
 		if (isNull(column.validity, index)) return null;
@@ -39,8 +39,43 @@ pub const Row = struct {
 			.container => |container| switch (container) {
 				.list => |vc| {
 					const entry = vc.entries[index];
-					return List(T).init(vc.child, vc.validity, entry.offset, entry.length);
+					return List(scalarReturn(T)).init(vc.child, vc.validity, entry.offset, entry.length);
 				},
+				else => return null,
+			},
+			else => return null,
+		}
+	}
+
+	pub fn getEnum(self: Row, col: usize) !?[]const u8 {
+		const index = self.index;
+		const column = self.columns[col];
+		if (isNull(column.validity, index)) return null;
+
+		switch (column.data) {
+			.container => |container| switch (container) {
+				.@"enum" => |enm| {
+					const enum_index = switch (enm.internal) {
+						.u8 => |internal| internal[index],
+						.u16 => |internal| internal[index],
+						.u32 => |internal| internal[index],
+						.u64 => |internal| internal[index],
+						else => unreachable,
+					};
+					var rows = enm.rows;
+					var gop1 = try rows.enum_name_cache.getOrPut(col);
+					if (!gop1.found_existing) {
+						gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
+					}
+
+					var gop2 = try gop1.value_ptr.getOrPut(enum_index);
+					if (!gop2.found_existing) {
+						const string_value = c.duckdb_enum_dictionary_value(enm.logical_type, enum_index);
+						gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));
+					}
+					return gop2.value_ptr.*;
+				},
+				else => return null,
 			},
 			else => return null,
 		}
@@ -128,8 +163,12 @@ pub const OwningRow = struct {
 		return self.row.get(T, col);
 	}
 
-	pub fn list(self: OwningRow, comptime T: type, col: usize) ?List(scalarReturn(T)) {
-		return self.row.list(T, col);
+	pub fn getEnum(self: OwningRow, col: usize) !?[]const u8 {
+		return self.row.getEnum(col);
+	}
+
+	pub fn getList(self: OwningRow, comptime T: type, col: usize) ?List(scalarReturn(T)) {
+		return self.row.getList(T, col);
 	}
 
 	pub fn deinit(self: OwningRow) void {
@@ -653,7 +692,7 @@ test "read date & time" {
 	}
 }
 
-test "list" {
+test "read list" {
 	const db = DB.init(t.allocator, ":memory:", .{}).ok;
 	defer db.deinit();
 
@@ -665,7 +704,7 @@ test "list" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		const list = row.list(i32, 0).?;
+		const list = row.getList(i32, 0).?;
 		try t.expectEqual(@as(usize, 5), list.len);
 		try t.expectEqual(@as(i32, 1), list.get(0).?);
 		try t.expectEqual(@as(i32, 32), list.get(1).?);
@@ -673,6 +712,45 @@ test "list" {
 		try t.expectEqual(@as(?i32, null), list.get(3));
 		try t.expectEqual(@as(i32, -4), list.get(4).?);
 	}
+}
+
+// There's some internal caching with this, so we need to test mulitple rows
+test "read enum" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+	conn.execZ("create type my_type as enum ('type_a', 'type_b')") catch unreachable;
+	conn.execZ("create type tea_type as enum ('keemun', 'silver_needle')") catch unreachable;
+
+	var rows = conn.queryZ(
+		\\ select 'type_a'::my_type, 'type_b'::my_type, null::my_type, 'type_a'::my_type, 'keemun'::tea_type, 'silver_needle'::tea_type, null::tea_type, 'silver_needle'::tea_type
+		\\ union all
+		\\ select 'type_b'::my_type, null::my_type, 'type_a'::my_type, 'type_b'::my_type, 'keemun'::tea_type, 'silver_needle'::tea_type, null::tea_type, 'silver_needle'::tea_type
+	, .{}).ok;
+	defer rows.deinit();
+
+	var row = (try rows.next()) orelse unreachable;
+	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
+	try t.expectEqualStrings("type_b", (try row.getEnum(1)).?);
+	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(2)));
+	try t.expectEqualStrings("type_a", (try row.getEnum(3)).?);
+	try t.expectEqualStrings("keemun", (try row.getEnum(4)).?);
+	try t.expectEqualStrings("silver_needle", (try row.getEnum(5)).?);
+	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(6)));
+	try t.expectEqualStrings("silver_needle", (try row.getEnum(7)).?);
+
+	row = (try rows.next()) orelse unreachable;
+	try t.expectEqualStrings("type_b", (try row.getEnum(0)).?);
+	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(1)));
+	try t.expectEqualStrings("type_a", (try row.getEnum(2)).?);
+	try t.expectEqualStrings("type_b", (try row.getEnum(3)).?);
+	try t.expectEqualStrings("keemun", (try row.getEnum(4)).?);
+	try t.expectEqualStrings("silver_needle", (try row.getEnum(5)).?);
+	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(6)));
+	try t.expectEqualStrings("silver_needle", (try row.getEnum(7)).?);
 }
 
 test "owning row" {
@@ -793,3 +871,4 @@ test "row: toMap" {
 		try t.expectEqual(@as(?typed.Timestamp, null), m.get(typed.Timestamp, "ntz"));
 	}
 }
+

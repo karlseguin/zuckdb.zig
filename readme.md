@@ -123,7 +123,7 @@ The `rows` returned from the `ok` case of a `query` exposes the following method
 
 The most important method on `rows` is `next()` which is used to iterate the results. `next()` is a typical Zig iterator and returns a `?Row` which will be null when no more rows exist to be iterated.
 
-`Row` exposes a `get(T, index) ?T` and `list(T, index) ?[]T` function.
+`Row` exposes a `get(T, index) ?T`, `getList(T, index) ?[]T` and `getEnum(index) !?[]const u8` function.
 
 The supported types for `get`, are:
 * `[]u8`, 
@@ -145,17 +145,23 @@ The supported types for `get`, are:
 * `zuckdb.Interval`
 * `zuckdb.UUID`
 
-There are a few important notes. First calling `get` with the wrong type will result in `null` being returned. Second, `get(T, i)` usually returns a `?T`. The only exception to this is `get([]u8, i)` which returns a `[]const u8` - I just didn't want to type `get([]const u8)` all the time.
+There are a few important notes. First calling `get` with the wrong type will result in `null` being returned. Second, `get(T, i)` usually returns a `?T`. The only exception to this is `get([]u8, i)` which returns a `[]const u8` - I just didn't want to type `get([]const u8)` all the time. Strings returned by get are only valid until the next call to `next()` or `rows.deinit()`.
 
-`row.list(T, i)` is used to fetch a list from duckdb. It returns a type that exposes a `len` and `get(i) ?T` function:
+`row.getList(T, i)` is used to fetch a list from duckdb. It returns a type that exposes a `len` and `get(i) ?T` function:
 
 
 ```zig
-const tags = row.list([]u8, 3) orelse unreachable; // TODO handle null properly
+const tags = row.getList([]u8, 3) orelse unreachable; // TODO handle null properly
 for (0..tags.len) |i| {
     const tag = tags.get(i);
     // get returns a nullable, so above, tag could be null
 }
+```
+
+`row.getEnum(i)` returns the string representation of an enum. Unlike strings returned from `row.get([]u8, i)`, the returned string is valid until `rows.deinit()` (the enum string value is interned within the `rows`, thus it survives calls to `rows.next()`).
+
+```zig
+const category = (try row.getEnum(3)) orelse "default";
 ```
 
 # Pool

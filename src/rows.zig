@@ -54,7 +54,14 @@ pub const Rows = struct {
 	// the type of each column, this is loaded once on init
 	column_types: []c.duckdb_type = undefined,
 
-	own_state: bool,
+	// The duckdb gives us the enum name, but as a C string we need to free. This
+	// is potentially both expensive and awkward. We're going to intern the enums
+	// and manage the strings in an arena.
+	_arena: ?*std.heap.ArenaAllocator = null,
+	arena: std.mem.Allocator,
+	// We might have more than 1 enum column. Our cache is:
+	//   column_index =>  internal_enum_integer => string
+	enum_name_cache: std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)),
 
 	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result, state: anytype) Result(Rows) {
 		const r = result.*;
@@ -63,26 +70,31 @@ pub const Rows = struct {
 		if (chunk_count == 0) {
 			// no chunk, we don't need to load everything else
 			return .{.ok = .{
+				.arena = undefined,
 				.stmt = stmt,
 				.result = result,
 				.chunk_count = 0,
 				.allocator = allocator,
 				.column_count = column_count,
-				.own_state = false,
+				.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(undefined),
 			}};
 		}
 
-		var own_state = false;
+		const arena = allocator.create(std.heap.ArenaAllocator) catch |err| {
+			return Result(Rows).allocErr(err, .{.stmt = stmt, .result = result});
+		};
+		arena.* = std.heap.ArenaAllocator.init(allocator);
+
 		var columns: []ColumnData = undefined;
 		var column_types: []c.duckdb_type = undefined;
 
 		if (@TypeOf(state) == @TypeOf(null)) {
-			own_state = true;
-			columns = allocator.alloc(ColumnData, column_count) catch |err| {
+			const aa = arena.allocator();
+			columns = aa.alloc(ColumnData, column_count) catch |err| {
 				return Result(Rows).allocErr(err, .{.stmt = stmt, .result = result});
 			};
 
-			column_types = allocator.alloc(c.duckdb_type, column_count) catch |err| {
+			column_types = aa.alloc(c.duckdb_type, column_count) catch |err| {
 				return Result(Rows).allocErr(err, .{.stmt = stmt, .result = result});
 			};
 		} else {
@@ -95,25 +107,26 @@ pub const Rows = struct {
 		}
 
 		return .{.ok = .{
+			._arena = arena,
 			.stmt = stmt,
+			.arena = arena.allocator(),
 			.result = result,
 			.columns = columns,
 			.allocator = allocator,
-			.own_state = own_state,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
 			.column_types = column_types,
+			.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(arena.allocator()),
 		}};
 	}
 
 	pub fn deinit(self: Rows) void {
 		const allocator = self.allocator;
 
-		if (self.own_state) {
-			allocator.free(self.columns);
-			allocator.free(self.column_types);
+		if (self._arena) |arena| {
+			arena.deinit();
+			allocator.destroy(arena);
 		}
-
 		const result = self.result;
 		c.duckdb_destroy_result(result);
 		allocator.free(@ptrCast([*]u8, result)[0..RESULT_SIZEOF]);
@@ -216,7 +229,7 @@ pub const Rows = struct {
 				if (generateScalarColumnData(vector, column_type)) |scalar| {
 					data = .{.scalar = scalar};
 				} else {
-					if (generateContainerColumnData(vector, column_type)) |container| {
+					if (generateContainerColumnData(self, vector, column_type)) |container| {
 						data = .{.container = container};
 					} else {
 						return error.UnknownDataType;
@@ -276,7 +289,7 @@ fn generateScalarColumnData(vector: c.duckdb_vector, column_type: usize) ?Column
 	}
 }
 
-fn generateContainerColumnData(vector: c.duckdb_vector, column_type: usize) ?ColumnData.Container {
+fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: usize) ?ColumnData.Container {
 	const raw_data = c.duckdb_vector_get_data(vector);
 	switch (column_type) {
 		c.DUCKDB_TYPE_LIST => {
@@ -288,6 +301,15 @@ fn generateContainerColumnData(vector: c.duckdb_vector, column_type: usize) ?Col
 				.child = child_data,
 				.validity = child_validity,
 				.entries = @ptrCast([*c]c.duckdb_list_entry, @alignCast(@alignOf(c.duckdb_list_entry), raw_data)),
+			}};
+		},
+		c.DUCKDB_TYPE_ENUM => {
+			const logical_type = c.duckdb_vector_get_column_type(vector);
+			const internal_type = c.duckdb_enum_internal_type(logical_type);
+			return .{.@"enum" = .{
+				.rows = rows,
+				.logical_type = logical_type,
+				.internal = generateScalarColumnData(vector, internal_type) orelse return null,
 			}};
 		},
 		else => return null,
@@ -308,22 +330,4 @@ test "query column names" {
 	try t.expectEqual(@as(usize, 2), rows.column_count);
 	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
 	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
-}
-
-test "prepare error" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
-	defer db.deinit();
-
-	const conn = try db.conn();
-	defer conn.deinit();
-
-	const stmt = conn.prepare("select x");
-	defer stmt.deinit();
-
-	switch (stmt) {
-		.ok => unreachable,
-		.err => |err| {
-			try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", err.desc);
-		}
-	}
 }
