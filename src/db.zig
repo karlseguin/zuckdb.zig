@@ -12,20 +12,20 @@ const CONFIG_ALIGNOF = c.config_alignof;
 const DB_SIZEOF = c.database_sizeof;
 const DB_ALIGNOF = c.database_alignof;
 
-pub const Config = struct {
-	enable_external_access: bool = true,
-	access_mode: AccessMode = .automatic,
-
-	const AccessMode = enum {
-		automatic,
-		read_only,
-		read_write,
-	};
-};
-
 pub const DB = struct{
 	allocator: Allocator,
 	db: *c.duckdb_database,
+
+	pub const Config = struct {
+		enable_external_access: bool = true,
+		access_mode: AccessMode = .automatic,
+
+		const AccessMode = enum {
+			automatic,
+			read_only,
+			read_write,
+		};
+	};
 
 	pub fn init(allocator: Allocator, path: []const u8, db_config: Config) Result(DB) {
 		const zpath = allocator.dupeZ(u8, path) catch |err| {
