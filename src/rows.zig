@@ -226,7 +226,7 @@ pub const Rows = struct {
 				// (like lists) can only contain scalar types. So we need an explicit function
 				// for loading Scalar data which we can re-use for lists.
 				var data: ColumnData.Data = undefined;
-				if (generateScalarColumnData(vector, column_type)) |scalar| {
+				if (generateScalarColumnData(self, vector, column_type)) |scalar| {
 					data = .{.scalar = scalar};
 				} else {
 					if (generateContainerColumnData(self, vector, column_type)) |container| {
@@ -251,7 +251,7 @@ pub const Rows = struct {
 	}
 };
 
-fn generateScalarColumnData(vector: c.duckdb_vector, column_type: usize) ?ColumnData.Scalar {
+fn generateScalarColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: usize) ?ColumnData.Scalar {
 	const raw_data = c.duckdb_vector_get_data(vector);
 	switch (column_type) {
 		c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR => return .{.blob = @ptrCast([*]c.duckdb_string_t, @alignCast(8, raw_data))},
@@ -285,6 +285,21 @@ fn generateScalarColumnData(vector: c.duckdb_vector, column_type: usize) ?Column
 			};
 			return .{.decimal = .{.width = width, .scale = scale, .internal = internal}};
 		},
+		c.DUCKDB_TYPE_ENUM => {
+			const logical_type = c.duckdb_vector_get_column_type(vector);
+			const internal_type = c.duckdb_enum_internal_type(logical_type);
+			return .{.@"enum" = .{
+				.rows = rows,
+				.logical_type = logical_type,
+				.internal = switch (internal_type) {
+					c.DUCKDB_TYPE_UTINYINT => .{.u8 = @ptrCast([*c]u8, raw_data)},
+					c.DUCKDB_TYPE_USMALLINT => .{.u16 = @ptrCast([*c]u16, @alignCast(2, raw_data))},
+					c.DUCKDB_TYPE_UINTEGER => .{.u32 = @ptrCast([*c]u32, @alignCast(4, raw_data))},
+					c.DUCKDB_TYPE_UBIGINT => .{.u64 = @ptrCast([*c]u64, @alignCast(8, raw_data))},
+					else => @panic("Unsupported enum internal storage type"), // I don't think this can happen, but if it can, I want to know about it
+				}
+			}};
+		},
 		else => return null,
 	}
 }
@@ -295,21 +310,13 @@ fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type
 		c.DUCKDB_TYPE_LIST => {
 			const child_vector = c.duckdb_list_vector_get_child(vector);
 			const child_type = c.duckdb_get_type_id(c.duckdb_vector_get_column_type(child_vector));
-			const child_data = generateScalarColumnData(child_vector, child_type) orelse return null;
+			const child_data = generateScalarColumnData(rows, child_vector, child_type) orelse return null;
 			const child_validity = c.duckdb_vector_get_validity(child_vector);
 			return .{.list = .{
 				.child = child_data,
 				.validity = child_validity,
+				.type = ParameterType.fromDuckDBType(child_type),
 				.entries = @ptrCast([*c]c.duckdb_list_entry, @alignCast(@alignOf(c.duckdb_list_entry), raw_data)),
-			}};
-		},
-		c.DUCKDB_TYPE_ENUM => {
-			const logical_type = c.duckdb_vector_get_column_type(vector);
-			const internal_type = c.duckdb_enum_internal_type(logical_type);
-			return .{.@"enum" = .{
-				.rows = rows,
-				.logical_type = logical_type,
-				.internal = generateScalarColumnData(vector, internal_type) orelse return null,
 			}};
 		},
 		else => return null,

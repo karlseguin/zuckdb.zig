@@ -42,6 +42,7 @@ pub const ParameterType = enum {
 	blob,
 	decimal,
 	@"enum",
+	list,
 	uuid,
 
 	pub fn jsonStringify(self: ParameterType, options: std.json.StringifyOptions, out: anytype) !void {
@@ -70,6 +71,7 @@ pub const ParameterType = enum {
 			18 => .blob,
 			19 => .decimal,
 			23 => .@"enum",
+			24 => .list,
 			27 => .uuid,
 			else => .unknown
 		};

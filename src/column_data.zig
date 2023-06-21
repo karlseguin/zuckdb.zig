@@ -1,6 +1,8 @@
 const c = @cImport(@cInclude("zuckdb.h"));
 
+const zuckdb = @import("zuckdb.zig");
 const Rows = @import("rows.zig").Rows;
+const ParameterType = zuckdb.ParameterType;
 
 // DuckDB exposes data as "vectors", which is essentially a pointer to memory
 // that holds data based on the column type (a vector is data for a column, not
@@ -36,11 +38,11 @@ pub const ColumnData = struct {
 		interval: [*]c.duckdb_interval,
 		decimal: ColumnData.Decimal,
 		uuid: [*c]i128,
+		@"enum": ColumnData.Enum,
 	};
 
 	pub const Container = union(enum) {
 		list: ColumnData.List,
-		@"enum": ColumnData.Enum,
 	};
 
 	pub const Decimal = struct {
@@ -59,12 +61,20 @@ pub const ColumnData = struct {
 	pub const List = struct {
 		child: Scalar,
 		validity: [*c]u64,
+		type: ParameterType,
 		entries: [*]c.duckdb_list_entry,
 	};
 
 	pub const Enum = struct {
 		rows: *Rows,
-		internal: Scalar,
+		internal: Internal,
 		logical_type: c.duckdb_logical_type,
+
+		pub const Internal = union(enum) {
+			u8: [*c]u8,
+			u16: [*c]u16,
+			u32: [*c]u32,
+			u64: [*c]u64,
+		};
 	};
 };

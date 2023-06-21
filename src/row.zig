@@ -30,7 +30,7 @@ pub const Row = struct {
 		}
 	}
 
-	pub fn getList(self: Row, comptime T: type, col: usize) ?List(scalarReturn(T)) {
+	pub fn getList(self: Row, col: usize) ?List {
 		const index = self.index;
 		const column = self.columns[col];
 		if (isNull(column.validity, index)) return null;
@@ -39,9 +39,8 @@ pub const Row = struct {
 			.container => |container| switch (container) {
 				.list => |vc| {
 					const entry = vc.entries[index];
-					return List(scalarReturn(T)).init(vc.child, vc.validity, entry.offset, entry.length);
+					return List.init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
 				},
-				else => return null,
 			},
 			else => return null,
 		}
@@ -53,30 +52,7 @@ pub const Row = struct {
 		if (isNull(column.validity, index)) return null;
 
 		switch (column.data) {
-			.container => |container| switch (container) {
-				.@"enum" => |enm| {
-					const enum_index = switch (enm.internal) {
-						.u8 => |internal| internal[index],
-						.u16 => |internal| internal[index],
-						.u32 => |internal| internal[index],
-						.u64 => |internal| internal[index],
-						else => unreachable,
-					};
-					var rows = enm.rows;
-					var gop1 = try rows.enum_name_cache.getOrPut(col);
-					if (!gop1.found_existing) {
-						gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
-					}
-
-					var gop2 = try gop1.value_ptr.getOrPut(enum_index);
-					if (!gop2.found_existing) {
-						const string_value = c.duckdb_enum_dictionary_value(enm.logical_type, enum_index);
-						gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));
-					}
-					return gop2.value_ptr.*;
-				},
-				else => return null,
-			},
+			.scalar => |scalar| return _getEnum(scalar, col, index),
 			else => return null,
 		}
 	}
@@ -453,31 +429,68 @@ fn getInterval(scalar: ColumnData.Scalar, index: usize) ?Interval {
 	}
 }
 
-pub fn List(comptime T: type) type {
-	return struct{
-		len: usize,
-		_validity: [*c]u64,
-		_offset: usize,
-		_scalar: ColumnData.Scalar,
-
-		const Self = @This();
-
-		fn init(scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
-			return .{
-				.len = length,
-				._offset = offset,
-				._scalar = scalar,
-				._validity = validity,
+fn _getEnum(scalar: ColumnData.Scalar, col: usize, index: usize) !?[]const u8 {
+	switch (scalar) {
+		.@"enum" => |enm| {
+			const enum_index = switch (enm.internal) {
+				.u8 => |internal| internal[index],
+				.u16 => |internal| internal[index],
+				.u32 => |internal| internal[index],
+				.u64 => |internal| internal[index],
 			};
-		}
+			var rows = enm.rows;
+			var gop1 = try rows.enum_name_cache.getOrPut(col);
+			if (!gop1.found_existing) {
+				gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
+			}
 
-		pub fn get(self: Self, i: usize) ?T {
-			const index = i + self._offset;
-			if (isNull(self._validity, index)) return null;
-			return getScalar(T, self._scalar, index);
-		}
-	};
+			var gop2 = try gop1.value_ptr.getOrPut(enum_index);
+			if (!gop2.found_existing) {
+				const string_value = c.duckdb_enum_dictionary_value(enm.logical_type, enum_index);
+				gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));
+			}
+			return gop2.value_ptr.*;
+		},
+		else => return null,
+	}
 }
+
+pub const List = struct {
+	len: usize,
+	col: usize,
+	type: ParameterType,
+	_validity: [*c]u64,
+	_offset: usize,
+	_scalar: ColumnData.Scalar,
+
+	fn init(col: usize, parameter_type: ParameterType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) List {
+		return .{
+			.col = col,
+			.len = length,
+			.type = parameter_type,
+			._offset = offset,
+			._scalar = scalar,
+			._validity = validity,
+		};
+	}
+
+	pub fn get(self: List, comptime T: type, i: usize) ?scalarReturn(T) {
+		const index = i + self._offset;
+		if (isNull(self._validity, index)) return null;
+		return getScalar(T, self._scalar, index);
+	}
+
+	pub fn getEnum(self: List, i: usize) !?[]const u8 {
+		const index = i + self._offset;
+		if (isNull(self._validity, index)) return null;
+		return _getEnum(self._scalar, self.col, index);
+	}
+};
+
+pub const ListInfo = struct {
+	len: usize,
+	type: ParameterType,
+};
 
 pub fn hugeInt(value: i128) c.duckdb_hugeint {
 	return .{
@@ -699,18 +712,62 @@ test "read list" {
 	const conn = try db.conn();
 	defer conn.deinit();
 
+	conn.execZ("create type my_type as enum ('type_a', 'type_b')") catch unreachable;
+
 	{
 		var rows = conn.queryZ("select [1, 32, 99, null, -4]::int[]", .{}).ok;
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		const list = row.getList(i32, 0).?;
+
+		const list = row.getList(0).?;
+		try t.expectEqual(ParameterType.i32, list.type);
 		try t.expectEqual(@as(usize, 5), list.len);
-		try t.expectEqual(@as(i32, 1), list.get(0).?);
-		try t.expectEqual(@as(i32, 32), list.get(1).?);
-		try t.expectEqual(@as(i32, 99), list.get(2).?);
-		try t.expectEqual(@as(?i32, null), list.get(3));
-		try t.expectEqual(@as(i32, -4), list.get(4).?);
+		try t.expectEqual(@as(i32, 1), list.get(i32, 0).?);
+		try t.expectEqual(@as(i32, 32), list.get(i32, 1).?);
+		try t.expectEqual(@as(i32, 99), list.get(i32, 2).?);
+		try t.expectEqual(@as(?i32, null), list.get(i32, 3));
+		try t.expectEqual(@as(i32, -4), list.get(i32, 4).?);
+	}
+
+	{
+		var rows = conn.queryZ("select ['tag1', null, 'tag2']::varchar[]", .{}).ok;
+		defer rows.deinit();
+
+		var row = (try rows.next()) orelse unreachable;
+		const list = row.getList(0).?;
+		try t.expectEqual(ParameterType.varchar, list.type);
+		try t.expectEqual(@as(usize, 3), list.len);
+		try t.expectEqualStrings("tag1", list.get([]u8, 0).?);
+		try t.expectEqual(@as(?[]const u8, null), list.get([]u8, 1));
+		try t.expectEqualStrings("tag2", list.get([]u8, 2).?);
+	}
+
+	{
+		var rows = conn.queryZ("select ['tag1', null, 'tag2']::varchar[]", .{}).ok;
+		defer rows.deinit();
+
+		var row = (try rows.next()) orelse unreachable;
+		const list = row.getList(0).?;
+		try t.expectEqual(ParameterType.varchar, list.type);
+		try t.expectEqual(@as(usize, 3), list.len);
+		try t.expectEqualStrings("tag1", list.get([]u8, 0).?);
+		try t.expectEqual(@as(?[]const u8, null), list.get([]u8, 1));
+		try t.expectEqualStrings("tag2", list.get([]u8, 2).?);
+	}
+
+	{
+		var rows = conn.queryZ("select ['type_a', null, 'type_b', 'type_a']::my_type[]", .{}).ok;
+		defer rows.deinit();
+
+		var row = (try rows.next()) orelse unreachable;
+		const list = row.getList(0).?;
+		try t.expectEqual(ParameterType.@"enum", list.type);
+		try t.expectEqual(@as(usize, 4), list.len);
+		try t.expectEqualStrings("type_a", (try list.getEnum(0)).?);
+		try t.expectEqual(@as(?[]const u8, null), try list.getEnum(1));
+		try t.expectEqualStrings("type_b", (try list.getEnum(2)).?);
+		try t.expectEqualStrings("type_a", (try list.getEnum(3)).?);
 	}
 }
 
