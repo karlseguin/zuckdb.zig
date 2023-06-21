@@ -178,7 +178,7 @@ fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_u
 
 fn bindByteArray(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
 	switch (c.duckdb_param_type(stmt, bind_index)) {
-		c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
+		c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM, c.DUCKDB_TYPE_INTERVAL => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
 		c.DUCKDB_TYPE_UUID => {
 			if (len != 36) return DuckDBError;
@@ -424,13 +424,15 @@ test "binding: date/time" {
 	const date = Date{.year = 2023, .month = 5, .day = 10};
 	const time = Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456};
 	const interval = Interval{.months = 3, .days = 7, .micros = 982810};
-	var rows = conn.query("select $1::date, $2::time, $3::timestamp, $4::interval", .{date, time, 751203002000000, interval}).ok;
+	var rows = conn.query("select $1::date, $2::time, $3::timestamp, $4::interval, $5::interval", .{date, time, 751203002000000, interval, "9298392 days"}).ok;
 	defer rows.deinit();
+
 	const row = (try rows.next()).?;
 	try t.expectEqual(date, row.get(Date, 0).?);
 	try t.expectEqual(time, row.get(Time, 1).?);
 	try t.expectEqual(@as(i64, 751203002000000), row.get(i64, 2).?);
 	try t.expectEqual(interval, row.get(Interval, 3).?);
+	try t.expectEqual(Interval{.months = 0, .days = 9298392, .micros = 0}, row.get(Interval, 4).?);
 }
 
 test "binding: enum" {
