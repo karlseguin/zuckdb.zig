@@ -254,7 +254,7 @@ pub const Rows = struct {
 fn generateScalarColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: usize) ?ColumnData.Scalar {
 	const raw_data = c.duckdb_vector_get_data(vector);
 	switch (column_type) {
-		c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR => return .{.blob = @ptrCast([*]c.duckdb_string_t, @alignCast(8, raw_data))},
+		c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => return .{.blob = @ptrCast([*]c.duckdb_string_t, @alignCast(8, raw_data))},
 		c.DUCKDB_TYPE_TINYINT => return .{.i8 = @ptrCast([*c]i8, raw_data)},
 		c.DUCKDB_TYPE_SMALLINT => return .{.i16 = @ptrCast([*c]i16, @alignCast(2, raw_data))},
 		c.DUCKDB_TYPE_INTEGER => return .{.i32 = @ptrCast([*c]i32, @alignCast(4, raw_data))},

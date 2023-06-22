@@ -178,7 +178,7 @@ fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_u
 
 fn bindByteArray(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
 	switch (c.duckdb_param_type(stmt, bind_index)) {
-		c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM, c.DUCKDB_TYPE_INTERVAL => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
+		c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM, c.DUCKDB_TYPE_INTERVAL, c.DUCKDB_TYPE_BIT => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
 		c.DUCKDB_TYPE_UUID => {
 			if (len != 36) return DuckDBError;
@@ -451,6 +451,35 @@ test "binding: enum" {
 	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
 	try t.expectEqualStrings("keemun", (try row.getEnum(1)).?);
 	try t.expectEqual(@as(?[]const u8, null), try row.getEnum(2));
+}
+
+test "binding: bistring" {
+	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	defer db.deinit();
+
+	const conn = try db.conn();
+	defer conn.deinit();
+
+
+	var rows = conn.queryZ(
+		\\ select $1::bit, $1::bit::varchar union all
+		\\ select $2::bit, $2::bit::varchar union all
+		\\ select $3::bit, $3::bit::varchar union all
+		\\ select $4::bit, $4::bit::varchar union all
+		\\ select $5::bit, $5::bit::varchar union all
+		\\ select $6::bit, $6::bit::varchar union all
+		\\ select $7::bit, $7::bit::varchar union all
+		\\ select $8::bit, $8::bit::varchar union all
+		\\ select $9::bit, $9::bit::varchar
+	, .{"0", "1", "0001111", "010", "101", "1111111110", "101010101010010101010100000101001001", "00000000000000000", "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111011111111111111111111111111111111111"}).ok;
+	defer rows.deinit();
+
+	// check that our toString is the same as duckdb's
+	while (try rows.next()) |row| {
+		const converted = try zuckdb.bitToString(t.allocator, row.get([]u8, 0).?);
+		defer t.allocator.free(converted);
+		try t.expectEqualStrings(row.get([]u8, 1).?, converted);
+	}
 }
 
 test "query parameters" {

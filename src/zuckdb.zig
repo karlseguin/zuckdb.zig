@@ -98,6 +98,30 @@ pub fn StaticState(comptime N: usize) type {
 	};
 }
 
+// tested in stmt's bit binding test
+pub fn bitToString(allocator: Allocator, data: []const u8) ![]u8 {
+	const shl = std.math.shl;
+
+	var i: usize = 0;
+	var padding = data[0];
+	var out = try allocator.alloc(u8, 8 - padding + (8 * (data.len - 2)));
+	// std.debug.print("{any} {d}\n", .{data, padding});
+
+	while (padding < 8) : (padding += 1) {
+		out[i] = if (data[1] & shl(u8, 1, (7 - padding)) != 0) '1' else '0';
+		i += 1;
+	}
+
+	for (data[2..]) |byte| {
+		for (0..8) |bit| {
+			out[i] = if (byte & shl(u8, 1, (7 - bit)) != 0) '1' else '0';
+			i += 1;
+		}
+	}
+
+	return out;
+}
+
 const t = std.testing;
 test {
 	t.refAllDecls(@This());
