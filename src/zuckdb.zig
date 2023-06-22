@@ -44,6 +44,7 @@ pub const ParameterType = enum {
 	@"enum",
 	list,
 	uuid,
+	bitstring,
 
 	pub fn jsonStringify(self: ParameterType, options: std.json.StringifyOptions, out: anytype) !void {
 		return std.json.encodeJsonString(@tagName(self), options, out);
@@ -73,6 +74,7 @@ pub const ParameterType = enum {
 			23 => .@"enum",
 			24 => .list,
 			27 => .uuid,
+			29 => .bitstring,
 			else => .unknown
 		};
 	}
