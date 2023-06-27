@@ -41,7 +41,7 @@ pub const DB = struct{
 		};
 
 		defer allocator.free(config_slice);
-		const config = @ptrCast(*c.duckdb_config, config_slice.ptr);
+		const config: *c.duckdb_config = @ptrCast(config_slice.ptr);
 
 		if (c.duckdb_create_config(config) == DuckDBError) {
 			return Result(DB).staticErr(error.CreateConfig, "error creating database config");
@@ -62,7 +62,7 @@ pub const DB = struct{
 		var db_slice = allocator.alignedAlloc(u8, DB_ALIGNOF, DB_SIZEOF) catch |err| {
 			return Result(DB).staticErr(err, "OOM");
 		};
-		const db = @ptrCast(*c.duckdb_database, db_slice.ptr);
+		const db: *c.duckdb_database = @ptrCast(db_slice.ptr);
 
 		var out_err: [*c]u8 = undefined;
 		if (c.duckdb_open_ext(path, db, config.*, &out_err) == DuckDBError) {
@@ -80,7 +80,10 @@ pub const DB = struct{
 	pub fn deinit(self: *const DB) void {
 		const db = self.db;
 		c.duckdb_close(db);
-		self.allocator.free(@ptrCast([*]u8, db)[0..DB_SIZEOF]);
+
+		const ptr: [*]align(DB_ALIGNOF) u8 = @ptrCast(db);
+		const slice = ptr[0..DB_SIZEOF];
+		self.allocator.free(slice);
 	}
 
 	pub fn conn(self: DB) !Conn {

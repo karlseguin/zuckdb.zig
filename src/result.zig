@@ -6,7 +6,7 @@ const Stmt = @import("stmt.zig").Stmt;
 const Allocator = std.mem.Allocator;
 
 const RESULT_SIZEOF = c.result_sizeof;
-const STATEMENT_SIZEOF = c.statement_sizeof;
+const RESULT_ALIGNOF = c.result_alignof;
 
 const Tag = enum {
 	ok,
@@ -80,7 +80,9 @@ pub const Err = struct {
 	pub fn deinit(self: Err) void {
 		if (self.result) |r| {
 			c.duckdb_destroy_result(r);
-			self.allocator.free(@ptrCast([*]u8, r)[0..RESULT_SIZEOF]);
+			const ptr: [*]align(RESULT_ALIGNOF) u8 = @ptrCast(r);
+			const slice = ptr[0..RESULT_SIZEOF];
+			self.allocator.free(slice);
 		}
 
 		if (self.stmt) |s| {

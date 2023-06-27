@@ -14,6 +14,7 @@ const hugeInt = @import("row.zig").hugeInt;
 const RESULT_SIZEOF = c.result_sizeof;
 const RESULT_ALIGNOF = c.result_alignof;
 const STATEMENT_SIZEOF = c.statement_sizeof;
+const STATEMENT_ALIGNOF = c.statement_alignof;
 
 const UUID = zuckdb.UUID;
 const Time = zuckdb.Time;
@@ -39,7 +40,9 @@ pub const Stmt = struct {
 			_ = c.duckdb_clear_bindings(stmt.*);
 		} else {
 			c.duckdb_destroy_prepare(stmt);
-			self.allocator.free(@ptrCast([*]u8, stmt)[0..STATEMENT_SIZEOF]);
+			const ptr: [*]align(STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
+			const slice = ptr[0..STATEMENT_SIZEOF];
+			self.allocator.free(slice);
 		}
 	}
 
@@ -60,7 +63,7 @@ pub const Stmt = struct {
 			return Result(Rows).allocErr(err, if (owned) .{.stmt = self} else .{});
 		};
 
-		const result = @ptrCast(*c.duckdb_result, slice.ptr);
+		const result: *c.duckdb_result = @ptrCast(slice.ptr);
 		if (c.duckdb_execute_prepared(self.stmt.*, result) == DuckDBError) {
 			return Result(Rows).resultErr(allocator, if (owned) self else null, result);
 		}
@@ -96,25 +99,25 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 	var rc: c_uint = 0;
 	switch (@typeInfo(T)) {
 		.Null => rc = c.duckdb_bind_null(stmt, bind_index),
-		.ComptimeInt => rc = bindI64(stmt, bind_index, @intCast(i64, value)),
-		.ComptimeFloat => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(f64, value)),
+		.ComptimeInt => rc = bindI64(stmt, bind_index, @intCast(value)),
+		.ComptimeFloat => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(value)),
 		.Int => |int| {
 			if (int.signedness == .signed) {
 				switch (int.bits) {
-					1...8 => rc = c.duckdb_bind_int8(stmt, bind_index, @intCast(i8, value)),
-					9...16 => rc = c.duckdb_bind_int16(stmt, bind_index, @intCast(i16, value)),
-					17...32 => rc = c.duckdb_bind_int32(stmt, bind_index, @intCast(i32, value)),
-					33...63 => rc = c.duckdb_bind_int64(stmt, bind_index, @intCast(i64, value)),
+					1...8 => rc = c.duckdb_bind_int8(stmt, bind_index, @intCast(value)),
+					9...16 => rc = c.duckdb_bind_int16(stmt, bind_index, @intCast(value)),
+					17...32 => rc = c.duckdb_bind_int32(stmt, bind_index, @intCast(value)),
+					33...63 => rc = c.duckdb_bind_int64(stmt, bind_index, @intCast(value)),
 					64 => rc = bindI64(stmt, bind_index, value),
-					65...128 => rc = c.duckdb_bind_hugeint(stmt, bind_index, hugeInt(@intCast(i128, value))),
+					65...128 => rc = c.duckdb_bind_hugeint(stmt, bind_index, hugeInt(@intCast(value))),
 					else => bindError(T),
 				}
 			} else {
 				switch (int.bits) {
-					1...8 => rc = c.duckdb_bind_uint8(stmt, bind_index, @intCast(u8, value)),
-					9...16 => rc = c.duckdb_bind_uint16(stmt, bind_index, @intCast(u16, value)),
-					17...32 => rc = c.duckdb_bind_uint32(stmt, bind_index, @intCast(u32, value)),
-					33...64 => rc = c.duckdb_bind_uint64(stmt, bind_index, @intCast(u64, value)),
+					1...8 => rc = c.duckdb_bind_uint8(stmt, bind_index, @intCast(value)),
+					9...16 => rc = c.duckdb_bind_uint16(stmt, bind_index, @intCast(value)),
+					17...32 => rc = c.duckdb_bind_uint32(stmt, bind_index, @intCast(value)),
+					33...64 => rc = c.duckdb_bind_uint64(stmt, bind_index, @intCast(value)),
 					// duckdb doesn't support u128
 					else => bindError(T),
 				}
@@ -122,8 +125,8 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 		},
 		.Float => |float| {
 			switch (float.bits) {
-				1...32 => rc = c.duckdb_bind_float(stmt, bind_index, @floatCast(f32, value)),
-				33...64 => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(f64, value)),
+				1...32 => rc = c.duckdb_bind_float(stmt, bind_index, @floatCast(value)),
+				33...64 => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(value)),
 				else => bindError(T),
 			}
 		},
@@ -179,7 +182,7 @@ fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_u
 fn bindByteArray(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*c]const u8, len: usize) c_uint {
 	switch (c.duckdb_param_type(stmt, bind_index)) {
 		c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM, c.DUCKDB_TYPE_INTERVAL, c.DUCKDB_TYPE_BIT => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
-		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast([*c]const u8, value), len),
+		c.DUCKDB_TYPE_BLOB => return c.duckdb_bind_blob(stmt, bind_index, @ptrCast(value), len),
 		c.DUCKDB_TYPE_UUID => {
 			if (len != 36) return DuckDBError;
 			return c.duckdb_bind_varchar_length(stmt, bind_index, value, 36);

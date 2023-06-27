@@ -29,7 +29,7 @@ pub const Conn = struct {
 
 		var slice = try allocator.alignedAlloc(u8, CONN_ALIGNOF, CONN_SIZEOF);
 		errdefer allocator.free(slice);
-		const conn = @ptrCast(*c.duckdb_connection, slice.ptr);
+		const conn: *c.duckdb_connection = @ptrCast(slice.ptr);
 
 		if (c.duckdb_connect(db.db.*, conn) == DuckDBError) {
 			return error.ConnectFail;
@@ -51,7 +51,10 @@ pub const Conn = struct {
 		stmt_cache.deinit();
 
 		c.duckdb_disconnect(conn);
-		allocator.free(@ptrCast([*]u8, conn)[0..CONN_SIZEOF]);
+
+		const ptr: [*]align(CONN_ALIGNOF) u8 = @ptrCast(conn);
+		const slice = ptr[0..CONN_SIZEOF];
+		allocator.free(slice);
 	}
 
 	pub fn begin(self: Conn) !void {
@@ -100,7 +103,7 @@ pub const Conn = struct {
 				var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
 				return Result(Rows).allocErr(err, .{});
 			};
-			const result = @ptrCast(*c.duckdb_result, slice.ptr);
+			const result: *c.duckdb_result = @ptrCast(slice.ptr);
 			if (c.duckdb_query(self.conn.*, sql, result) == DuckDBError) {
 				return Result(Rows).resultErr(allocator, null, result);
 			}
@@ -172,7 +175,7 @@ pub const Conn = struct {
 			return Result(Stmt).allocErr(err, .{});
 		};
 
-		const stmt = @ptrCast(*c.duckdb_prepared_statement, slice.ptr);
+		const stmt: *c.duckdb_prepared_statement = @ptrCast(slice.ptr);
 		if (c.duckdb_prepare(self.conn.*, sql, stmt) == DuckDBError) {
 			return .{.err = .{
 				.err = error.Prepare,
@@ -261,7 +264,10 @@ pub const Conn = struct {
 			allocator.free(entry.key_ptr.*);
 			const stmt = entry.value_ptr.*;
 			c.duckdb_destroy_prepare(stmt);
-			allocator.free(@ptrCast([*]u8, stmt)[0..STATEMENT_SIZEOF]);
+
+			const ptr: [*]align(STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
+			const slice = ptr[0..STATEMENT_SIZEOF];
+			self.allocator.free(slice);
 		}
 		stmt_cache.clearRetainingCapacity();
 	}

@@ -62,64 +62,64 @@ pub const Row = struct {
 
 		var aa = builder.arena.allocator();
 		var map = typed.Map.init(aa);
-		try map.ensureTotalCapacity(@intCast(u32, types.len));
+		try map.ensureTotalCapacity(@intCast(types.len));
 		errdefer map.deinit();
 
 		for (types, builder.names, 0..) |tpe, name, i| {
 			switch (tpe) {
 				.varchar, .blob => {
 					if (self.get([]u8, i)) |value| {
-						map.putAssumeCapacity(name, try aa.dupe(u8, value));
+						try map.putAssumeCapacity(name, try aa.dupe(u8, value));
 					} else {
-						map.putAssumeCapacity(name, null);
+						try map.putAssumeCapacity(name, null);
 					}
 				},
-				.bool => map.putAssumeCapacity(name, self.get(bool, i)),
-				.i8 => map.putAssumeCapacity(name, self.get(i8, i)),
-				.i16 => map.putAssumeCapacity(name, self.get(i16, i)),
-				.i32 => map.putAssumeCapacity(name, self.get(i32, i)),
-				.i64 => map.putAssumeCapacity(name, self.get(i64, i)),
-				.u8 => map.putAssumeCapacity(name, self.get(u8, i)),
-				.u16 => map.putAssumeCapacity(name, self.get(u16, i)),
-				.u32 => map.putAssumeCapacity(name, self.get(u32, i)),
-				.u64 => map.putAssumeCapacity(name, self.get(u64, i)),
-				.f32 => map.putAssumeCapacity(name, self.get(f32, i)),
-				.f64, .decimal => map.putAssumeCapacity(name, self.get(f64, i)),
-				.i128 => map.putAssumeCapacity(name, self.get(i128, i)),
+				.bool => try map.putAssumeCapacity(name, self.get(bool, i)),
+				.i8 => try map.putAssumeCapacity(name, self.get(i8, i)),
+				.i16 => try map.putAssumeCapacity(name, self.get(i16, i)),
+				.i32 => try map.putAssumeCapacity(name, self.get(i32, i)),
+				.i64 => try map.putAssumeCapacity(name, self.get(i64, i)),
+				.u8 => try map.putAssumeCapacity(name, self.get(u8, i)),
+				.u16 => try map.putAssumeCapacity(name, self.get(u16, i)),
+				.u32 => try map.putAssumeCapacity(name, self.get(u32, i)),
+				.u64 => try map.putAssumeCapacity(name, self.get(u64, i)),
+				.f32 => try map.putAssumeCapacity(name, self.get(f32, i)),
+				.f64, .decimal => try map.putAssumeCapacity(name, self.get(f64, i)),
+				.i128 => try map.putAssumeCapacity(name, self.get(i128, i)),
 				.uuid => {
 					if (self.get(zuckdb.UUID, i)) |uuid| {
-						map.putAssumeCapacity(name, try aa.dupe(u8, &uuid));
+						try map.putAssumeCapacity(name, try aa.dupe(u8, &uuid));
 					} else {
-						map.putAssumeCapacity(name, null);
+						try map.putAssumeCapacity(name, null);
 					}
 				},
 				.date => {
 					if (self.get(zuckdb.Date, i)) |date| {
-						map.putAssumeCapacity(name, typed.Date{
-							.year = @intCast(i16, date.year),
-							.month = @intCast(u8, date.month),
-							.day = @intCast(u8, date.day),
+						try map.putAssumeCapacity(name, typed.Date{
+							.year = @intCast(date.year),
+							.month = @intCast(date.month),
+							.day = @intCast(date.day),
 						});
 					} else {
-						map.putAssumeCapacity(name, null);
+						try map.putAssumeCapacity(name, null);
 					}
 				},
 				.time => {
 					if (self.get(zuckdb.Time, i)) |time| {
-						map.putAssumeCapacity(name, typed.Time{
-							.hour = @intCast(u8, time.hour),
-							.min =  @intCast(u8, time.min),
-							.sec =  @intCast(u8, time.sec),
+						try map.putAssumeCapacity(name, typed.Time{
+							.hour = @intCast(time.hour),
+							.min =  @intCast(time.min),
+							.sec =  @intCast(time.sec),
 						});
 					} else {
-						map.putAssumeCapacity(name, null);
+						try map.putAssumeCapacity(name, null);
 					}
 				},
 				.timestamp => {
 					if (self.get(i64, i)) |micros| {
-						map.putAssumeCapacity(name, typed.Timestamp{.micros = micros});
+						try map.putAssumeCapacity(name, typed.Timestamp{.micros = micros});
 					} else {
-						map.putAssumeCapacity(name, null);
+						try map.putAssumeCapacity(name, null);
 					}
 				},
 				else => return error.UnsupportedMapType,
@@ -274,75 +274,75 @@ fn getUUID(scalar: ColumnData.Scalar, index: usize) ?UUID {
 
 	var buf: [36]u8 = undefined;
 
-	const b1 = @intCast(u8, (u >> 56) & 0xFF);
+	const b1: u8 = @intCast((u >> 56) & 0xFF);
 	buf[0] = hex[b1 >> 4];
 	buf[1] = hex[b1 & 0x0f];
 
-	const b2 = @intCast(u8, (u >> 48) & 0xFF);
+	const b2: u8 = @intCast((u >> 48) & 0xFF);
 	buf[2] = hex[b2 >> 4];
 	buf[3] = hex[b2 & 0x0f];
 
-	const b3 = @intCast(u8, (u >> 40) & 0xFF);
+	const b3: u8 = @intCast((u >> 40) & 0xFF);
 	buf[4] = hex[b3 >> 4];
 	buf[5] = hex[b3 & 0x0f];
 
-	const b4 = @intCast(u8, (u >> 32) & 0xFF);
+	const b4: u8 = @intCast((u >> 32) & 0xFF);
 	buf[6] = hex[b4 >> 4];
 	buf[7] = hex[b4 & 0x0f];
 
 	buf[8] = '-';
 
-	const b5 = @intCast(u8, (u >> 24) & 0xFF);
+	const b5: u8 = @intCast((u >> 24) & 0xFF);
 	buf[9] = hex[b5 >> 4];
 	buf[10] = hex[b5 & 0x0f];
 
-	const b6 = @intCast(u8, (u >> 16) & 0xFF);
+	const b6: u8 = @intCast((u >> 16) & 0xFF);
 	buf[11] = hex[b6 >> 4];
 	buf[12] = hex[b6 & 0x0f];
 
 	buf[13] = '-';
 
-	const b7 = @intCast(u8, (u >> 8) & 0xFF);
+	const b7: u8 = @intCast((u >> 8) & 0xFF);
 	buf[14] = hex[b7 >> 4];
 	buf[15] = hex[b7 & 0x0f];
 
-	const b8 = @intCast(u8, u & 0xFF);
+	const b8: u8 = @intCast(u & 0xFF);
 	buf[16] = hex[b8 >> 4];
 	buf[17] = hex[b8 & 0x0f];
 
 	buf[18] = '-';
 
-	const b9 = @intCast(u8, (l >> 56) & 0xFF);
+	const b9: u8 = @intCast((l >> 56) & 0xFF);
 	buf[19] = hex[b9 >> 4];
 	buf[20] = hex[b9 & 0x0f];
 
-	const b10 = @intCast(u8, (l >> 48) & 0xFF);
+	const b10: u8 = @intCast((l >> 48) & 0xFF);
 	buf[21] = hex[b10 >> 4];
 	buf[22] = hex[b10 & 0x0f];
 
 	buf[23] = '-';
 
-	const b11 = @intCast(u8, (l >> 40) & 0xFF);
+	const b11: u8 = @intCast((l >> 40) & 0xFF);
 	buf[24] = hex[b11 >> 4];
 	buf[25] = hex[b11 & 0x0f];
 
-	const b12 = @intCast(u8, (l >> 32) & 0xFF);
+	const b12: u8 = @intCast((l >> 32) & 0xFF);
 	buf[26] = hex[b12 >> 4];
 	buf[27] = hex[b12 & 0x0f];
 
-	const b13 = @intCast(u8, (l >> 24) & 0xFF);
+	const b13: u8 = @intCast((l >> 24) & 0xFF);
 	buf[28] = hex[b13 >> 4];
 	buf[29] = hex[b13 & 0x0f];
 
-	const b14 = @intCast(u8, (l >> 16) & 0xFF);
+	const b14: u8 = @intCast((l >> 16) & 0xFF);
 	buf[30] = hex[b14 >> 4];
 	buf[31] = hex[b14 & 0x0f];
 
-	const b15 = @intCast(u8, (l >> 8) & 0xFF);
+	const b15: u8 = @intCast((l >> 8) & 0xFF);
 	buf[32] = hex[b15 >> 4];
 	buf[33] = hex[b15 & 0x0f];
 
-	const b16 = @intCast(u8, l & 0xFF);
+	const b16: u8 = @intCast(l & 0xFF);
 	buf[34] = hex[b16 >> 4];
 	buf[35] = hex[b16 & 0x0f];
 
@@ -494,8 +494,8 @@ pub const ListInfo = struct {
 
 pub fn hugeInt(value: i128) c.duckdb_hugeint {
 	return .{
-		.lower = @intCast(u64, @mod(value, 18446744073709551616)),
-		.upper = @intCast(i64, @divFloor(value, 18446744073709551616)),
+		.lower = @intCast(@mod(value, 18446744073709551616)),
+		.upper = @intCast(@divFloor(value, 18446744073709551616)),
 	};
 }
 
