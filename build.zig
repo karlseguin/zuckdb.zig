@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const LazyPath = std.Build.LazyPath;
+
 pub fn build(b: *std.Build) !void {
 	const target = b.standardTargetOptions(.{});
 	const optimize = b.standardOptimizeOption(.{});
@@ -20,9 +22,10 @@ pub fn build(b: *std.Build) !void {
 		.optimize = optimize,
 	});
 
-	lib_test.addRPath("lib");
-	lib_test.addLibraryPath("lib");
-	lib_test.addIncludePath("lib/");
+	const lib_path = LazyPath.relative("lib");
+	lib_test.addRPath(lib_path);
+	lib_test.addLibraryPath(lib_path);
+	lib_test.addIncludePath(lib_path);
 	lib_test.linkSystemLibrary("duckdb");
 	lib_test.addModule("typed", typed_module);
 
