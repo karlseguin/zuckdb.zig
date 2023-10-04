@@ -12,7 +12,7 @@ const db = switch (zuckdb.DB.init(allocator, "/tmp/db.duck", .{})) {
 }
 defer db.deinit();
 
-const conn = db.conn();
+const conn = try db.conn();
 defer conn.deinit();
 
 {
