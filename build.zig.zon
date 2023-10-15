@@ -1,5 +1,6 @@
 .{
   .name = "zuckdb",
+  .paths = .{""},
   .version = "0.0.0",
   .dependencies = .{
     .typed = .{
