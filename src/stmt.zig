@@ -59,7 +59,7 @@ pub const Stmt = struct {
 
 	pub fn executeOwned(self: Stmt, state: anytype, owned: bool) Result(Rows) {
 		const allocator = self.allocator;
-		var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
+		const slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
 			return Result(Rows).allocErr(err, if (owned) .{.stmt = self} else .{});
 		};
 

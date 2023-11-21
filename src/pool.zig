@@ -34,7 +34,7 @@ pub const Pool = struct {
 		var init_count: usize = 0;
 		const on_connection = config.on_connection;
 		for (0..size) |i| {
-			var conn = db.conn() catch |err| {
+			const conn = db.conn() catch |err| {
 				poolInitFailCleanup(allocator, conns, init_count);
 				return Result(Pool).staticErr(err, "open connection failure");
 			};

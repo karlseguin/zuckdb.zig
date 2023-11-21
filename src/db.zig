@@ -36,7 +36,7 @@ pub const DB = struct{
 	}
 
 	pub fn initZ(allocator: Allocator, path: [*:0]const u8, db_config: Config) Result(DB) {
-		var config_slice = allocator.alignedAlloc(u8, CONFIG_ALIGNOF, CONFIG_SIZEOF) catch |err| {
+		const config_slice = allocator.alignedAlloc(u8, CONFIG_ALIGNOF, CONFIG_SIZEOF) catch |err| {
 			return Result(DB).staticErr(err, "OOM");
 		};
 
@@ -59,7 +59,7 @@ pub const DB = struct{
 			}
 		}
 
-		var db_slice = allocator.alignedAlloc(u8, DB_ALIGNOF, DB_SIZEOF) catch |err| {
+		const db_slice = allocator.alignedAlloc(u8, DB_ALIGNOF, DB_SIZEOF) catch |err| {
 			return Result(DB).staticErr(err, "OOM");
 		};
 		const db: *c.duckdb_database = @ptrCast(db_slice.ptr);

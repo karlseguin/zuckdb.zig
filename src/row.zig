@@ -444,7 +444,7 @@ fn _getEnum(scalar: ColumnData.Scalar, col: usize, index: usize) !?[]const u8 {
 				gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
 			}
 
-			var gop2 = try gop1.value_ptr.getOrPut(enum_index);
+			const gop2 = try gop1.value_ptr.getOrPut(enum_index);
 			if (!gop2.found_existing) {
 				const string_value = c.duckdb_enum_dictionary_value(enm.logical_type, enum_index);
 				gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));

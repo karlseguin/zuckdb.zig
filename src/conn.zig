@@ -27,7 +27,7 @@ pub const Conn = struct {
 	pub fn open(db: DB) !Conn {
 		const allocator = db.allocator;
 
-		var slice = try allocator.alignedAlloc(u8, CONN_ALIGNOF, CONN_SIZEOF);
+		const slice = try allocator.alignedAlloc(u8, CONN_ALIGNOF, CONN_SIZEOF);
 		errdefer allocator.free(slice);
 		const conn: *c.duckdb_connection = @ptrCast(slice.ptr);
 
@@ -100,7 +100,7 @@ pub const Conn = struct {
 	pub fn queryZWithState(self: Conn, sql: [:0]const u8, values: anytype, state: anytype) Result(Rows) {
 		if (values.len == 0) {
 				const allocator = self.allocator;
-				var slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
+				const slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
 				return Result(Rows).allocErr(err, .{});
 			};
 			const result: *c.duckdb_result = @ptrCast(slice.ptr);
@@ -171,7 +171,7 @@ pub const Conn = struct {
 
 	pub fn prepareZ(self: *const Conn, sql: [:0]const u8) Result(Stmt) {
 		const allocator = self.allocator;
-		var slice = allocator.alignedAlloc(u8, STATEMENT_ALIGNOF, STATEMENT_SIZEOF) catch |err| {
+		const slice = allocator.alignedAlloc(u8, STATEMENT_ALIGNOF, STATEMENT_SIZEOF) catch |err| {
 			return Result(Stmt).allocErr(err, .{});
 		};
 
