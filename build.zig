@@ -12,8 +12,8 @@ pub fn build(b: *std.Build) !void {
 	}).module("typed");
 
 	_ = b.addModule("zuckdb", .{
-		.source_file = .{ .path = "src/zuckdb.zig" },
-		.dependencies = &.{ .{.name = "typed", .module = typed_module }},
+		.root_source_file = .{ .path = "src/zuckdb.zig" },
+		.imports = &.{ .{.name = "typed", .module = typed_module }},
 	});
 
 	const lib_test = b.addTest(.{
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) !void {
 	lib_test.addLibraryPath(lib_path);
 	lib_test.addIncludePath(lib_path);
 	lib_test.linkSystemLibrary("duckdb");
-	lib_test.addModule("typed", typed_module);
+	lib_test.root_module.addImport("typed", typed_module);
 
 	const run_test = b.addRunArtifact(lib_test);
 	run_test.has_side_effects = true;
