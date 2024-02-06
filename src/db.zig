@@ -30,13 +30,11 @@ pub const DB = struct{
 		};
 	};
 
-	pub fn init(allocator: Allocator, path: []const u8, db_config: Config) !DB {
-		const zpath = try allocator.dupeZ(u8, path);
-		defer allocator.free(zpath);
-		return DB.initZ(allocator, zpath, db_config);
-	}
 
-	pub fn initZ(allocator: Allocator, path: [*:0]const u8, db_config: Config) !DB {
+	pub fn init(allocator: Allocator, path: anytype, db_config: Config) !DB {
+		const str = try lib.stringZ(path, allocator);
+		defer str.deinit(allocator);
+
 		const config_slice = try allocator.alignedAlloc(u8, CONFIG_ALIGNOF, CONFIG_SIZEOF);
 		defer allocator.free(config_slice);
 		const config: *c.duckdb_config = @ptrCast(config_slice.ptr);
@@ -62,7 +60,7 @@ pub const DB = struct{
 		const db: *c.duckdb_database = @ptrCast(db_slice.ptr);
 
 		var out_err: [*c]u8 = undefined;
-		if (c.duckdb_open_ext(path, db, config.*, &out_err) == DuckDBError) {
+		if (c.duckdb_open_ext(str.z, db, config.*, &out_err) == DuckDBError) {
 			log.err("zudkdb failed to open database: {s}", .{std.mem.span(out_err)});
 			c.duckdb_free(out_err);
 			return error.OpenDB;

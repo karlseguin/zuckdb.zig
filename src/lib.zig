@@ -113,7 +113,7 @@ pub fn stringZ(str: anytype, allocator: Allocator) !StringZ {
 	if (comptime isStringArray(T)) {
 		return .{.duped = true, .z = try allocator.dupeZ(u8, &str)};
 	}
-	@compileError("SQL statement should be a string, got: {}" ++ @typeName(T));
+	@compileError("Expected a string, got: {}" ++ @typeName(T));
 }
 
 fn isNullTerminatedString(comptime T: type) bool {
