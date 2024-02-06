@@ -168,12 +168,12 @@ const category = (try row.getEnum(3)) orelse "default";
 The `zuckdb.Pool` is a thread-safe connection pool:
 
 ```zig
-const db = DB.init(t.allocator, "/tmp/duckdb.zig.test", .{}).ok;
+const db = zuckdb.DB.init(allocator, "/tmp/duckdb.zig.test", .{}).ok;
 var pool = db.pool(.{
     .size = 2,
     .on_connection = &connInit,
     .on_first_connection = &poolInit,
-}).ok
+}).ok;
 defer pool.deinit();
 
 const conn = pool.acquire();

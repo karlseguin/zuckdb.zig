@@ -18,6 +18,5 @@ const size_t result_alignof = 8;
 const size_t statement_sizeof = sizeof(duckdb_prepared_statement);
 const size_t statement_alignof = alignof(duckdb_prepared_statement);
 
-
 const size_t appender_sizeof = sizeof(duckdb_appender);
 const size_t appender_alignof = alignof(duckdb_appender);

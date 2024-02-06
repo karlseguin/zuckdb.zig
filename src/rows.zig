@@ -1,32 +1,21 @@
 const std = @import("std");
-const zuckdb = @import("zuckdb.zig");
-const c = @cImport(@cInclude("zuckdb.h"));
+const lib = @import("lib.zig");
 
-const row = @import("row.zig");
-const Row = row.Row;
-const MapBuilder = row.MapBuilder;
-const ParameterType = zuckdb.ParameterType;
-
-const DB = @import("db.zig").DB;
-const Stmt = @import("stmt.zig").Stmt;
-const Result = @import("result.zig").Result;
-const ColumnData = @import("column_data.zig").ColumnData;
+const c = lib.c;
+const Row = lib.Row;
+const MapBuilder = lib.MapBuilder;
+const ParameterType = lib.ParameterType;
+const ColumnData = lib.ColumnData;
 
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
-const RESULT_SIZEOF = c.result_sizeof;
-const RESULT_ALIGNOF = c.result_alignof;
 
 pub const Rows = struct {
 	allocator: Allocator,
 
-	// The statement that created this result. A result can be created directly
-	// without a prepared statement. Also, a prepared statement's lifetime can
-	// be longr than the result. When stmt != null, it means we now own the stmt
-	// and must clean it up when we're done. This is used in simple APIs (e.g.
-	// query with args).
-	stmt: ?Stmt,
+	// When not null, the rows owns the stmt and is responsible for freeing it.
+	stmt: ?*c.duckdb_prepared_statement,
 
 	// The underlying duckdb result
 	result: *c.duckdb_result,
@@ -58,46 +47,43 @@ pub const Rows = struct {
 	// The duckdb gives us the enum name, but as a C string we need to free. This
 	// is potentially both expensive and awkward. We're going to intern the enums
 	// and manage the strings in an arena.
-	_arena: ?*std.heap.ArenaAllocator = null,
+	_arena: *std.heap.ArenaAllocator,
 	arena: std.mem.Allocator,
+
 	// We might have more than 1 enum column. Our cache is:
 	//   column_index =>  internal_enum_integer => string
 	enum_name_cache: std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)),
 
-	pub fn init(allocator: Allocator, stmt: ?Stmt, result: *c.duckdb_result, state: anytype) Result(Rows) {
+	pub fn init(allocator: Allocator, stmt: ?*c.duckdb_prepared_statement, result: *c.duckdb_result, state: anytype) !Rows {
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
 		const column_count = c.duckdb_column_count(result);
 		if (chunk_count == 0) {
 			// no chunk, we don't need to load everything else
-			return .{ .ok = .{
+			return .{
 				.arena = undefined,
+				._arena = undefined,
 				.stmt = stmt,
 				.result = result,
 				.chunk_count = 0,
 				.allocator = allocator,
 				.column_count = column_count,
 				.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(undefined),
-			} };
+			};
 		}
 
-		const arena = allocator.create(std.heap.ArenaAllocator) catch |err| {
-			return Result(Rows).allocErr(err, .{ .stmt = stmt, .result = result });
-		};
+		const arena = try allocator.create(std.heap.ArenaAllocator);
+		errdefer arena.deinit();
 		arena.* = std.heap.ArenaAllocator.init(allocator);
+
+		const aa = arena.allocator();
 
 		var columns: []ColumnData = undefined;
 		var column_types: []c.duckdb_type = undefined;
 
 		if (@TypeOf(state) == @TypeOf(null)) {
-			const aa = arena.allocator();
-			columns = aa.alloc(ColumnData, column_count) catch |err| {
-				return Result(Rows).allocErr(err, .{ .stmt = stmt, .result = result });
-			};
-
-			column_types = aa.alloc(c.duckdb_type, column_count) catch |err| {
-				return Result(Rows).allocErr(err, .{ .stmt = stmt, .result = result });
-			};
+			columns = try aa.alloc(ColumnData, column_count);
+			column_types = try aa.alloc(c.duckdb_type, column_count);
 		} else {
 			columns = try state.getColumns(column_count);
 			column_types = try state.getColumnTypes(column_count);
@@ -107,37 +93,44 @@ pub const Rows = struct {
 			column_types[i] = c.duckdb_column_type(result, i);
 		}
 
-		return .{ .ok = .{
-			._arena = arena,
+		return .{
 			.stmt = stmt,
-			.arena = arena.allocator(),
+			._arena = arena,
+			.arena = aa,
 			.result = result,
 			.columns = columns,
 			.allocator = allocator,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
 			.column_types = column_types,
-			.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(arena.allocator()),
-		} };
+			.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(aa),
+		};
 	}
 
 	pub fn deinit(self: Rows) void {
 		const allocator = self.allocator;
 
-		if (self._arena) |arena| {
-			arena.deinit();
-			allocator.destroy(arena);
+		{
+			const result = self.result;
+			c.duckdb_destroy_result(result);
+			const ptr: [*]align(lib.RESULT_ALIGNOF) u8 = @ptrCast(result);
+			const slice = ptr[0..lib.RESULT_SIZEOF];
+			allocator.free(slice);
 		}
-		const result = self.result;
-		c.duckdb_destroy_result(result);
-
-		const ptr: [*]align(RESULT_ALIGNOF) u8 = @ptrCast(result);
-		const slice = ptr[0..RESULT_SIZEOF];
-		allocator.free(slice);
 
 		if (self.stmt) |stmt| {
-			stmt.deinit();
+			c.duckdb_destroy_prepare(stmt);
+			const ptr: [*]align(lib.STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
+			const slice = ptr[0..lib.STATEMENT_SIZEOF];
+			allocator.free(slice);
 		}
+
+		if (self.chunk_count == 0) {
+			return;
+		}
+
+		self._arena.deinit();
+		allocator.destroy(self._arena);
 	}
 
 	pub fn changed(self: Rows) usize {
@@ -152,8 +145,8 @@ pub const Rows = struct {
 		return c.duckdb_column_name(self.result, i);
 	}
 
-	pub fn columnType(self: Rows, i: usize) zuckdb.ParameterType {
-		return zuckdb.ParameterType.fromDuckDBType(self.column_types[i]);
+	pub fn columnType(self: Rows, i: usize) ParameterType {
+		return ParameterType.fromDuckDBType(self.column_types[i]);
 	}
 
 	pub fn mapBuilder(self: Rows, allocator: Allocator) !MapBuilder {
@@ -330,16 +323,19 @@ fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type
 }
 
 const t = std.testing;
+const DB = lib.DB;
 test "query column names" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-	try conn.execZ("create table test(id integer, name varchar);");
-	const rows = conn.queryZ("select id, name from test", .{}).ok;
+	_ = try conn.exec("create table test(id integer, name varchar);", .{});
+
+	const rows = try conn.query("select id, name from test", .{});
 	defer rows.deinit();
+
 	try t.expectEqual(@as(usize, 2), rows.column_count);
 	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
 	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));

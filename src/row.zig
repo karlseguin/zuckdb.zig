@@ -1,17 +1,17 @@
 const std = @import("std");
 const typed = @import("typed");
-const zuckdb = @import("zuckdb.zig");
-const c = @cImport(@cInclude("zuckdb.h"));
+const lib = @import("lib.zig");
 
-const DB = @import("db.zig").DB;
-const Rows = @import("rows.zig").Rows;
-const ColumnData = @import("column_data.zig").ColumnData;
+const c = lib.c;
+const DB = lib.DB;
+const Rows = lib.Rows;
+const ColumnData = lib.ColumnData;
 
-const UUID = zuckdb.UUID;
-const Time = zuckdb.Time;
-const Date = zuckdb.Date;
-const Interval = zuckdb.Interval;
-const ParameterType = zuckdb.ParameterType;
+const UUID = lib.UUID;
+const Time = lib.Time;
+const Date = lib.Date;
+const Interval = lib.Interval;
+const ParameterType = lib.ParameterType;
 
 const Allocator = std.mem.Allocator;
 
@@ -87,14 +87,14 @@ pub const Row = struct {
 				.f64, .decimal => try map.putAssumeCapacity(name, self.get(f64, i)),
 				.i128 => try map.putAssumeCapacity(name, self.get(i128, i)),
 				.uuid => {
-					if (self.get(zuckdb.UUID, i)) |uuid| {
+					if (self.get(UUID, i)) |uuid| {
 						try map.putAssumeCapacity(name, try aa.dupe(u8, &uuid));
 					} else {
 						try map.putAssumeCapacity(name, null);
 					}
 				},
 				.date => {
-					if (self.get(zuckdb.Date, i)) |date| {
+					if (self.get(Date, i)) |date| {
 						try map.putAssumeCapacity(name, typed.Date{
 							.year = @intCast(date.year),
 							.month = @intCast(date.month),
@@ -105,7 +105,7 @@ pub const Row = struct {
 					}
 				},
 				.time => {
-					if (self.get(zuckdb.Time, i)) |time| {
+					if (self.get(Time, i)) |time| {
 						try map.putAssumeCapacity(name, typed.Time{
 							.hour = @intCast(time.hour),
 							.min =  @intCast(time.min),
@@ -129,7 +129,7 @@ pub const Row = struct {
 	}
 };
 
-// Returned by conn.row / rowZ, wraps a row and rows, the latter so that
+// Returned by conn.row, wraps a row and rows, the latter so that
 // it can be deinit'd
 pub const OwningRow = struct {
 	row: Row,
@@ -267,7 +267,7 @@ fn getUUID(scalar: ColumnData.Scalar, index: usize) ?UUID {
 	const hex = "0123456789abcdef";
 	const n = getI128(scalar, index) orelse return null;
 
-	const h = hugeInt(n);
+	const h = lib.hugeInt(n);
 
 	const u = h.upper ^ (@as(i64, 1) << 63);
 	const l = h.lower;
@@ -396,7 +396,7 @@ fn getF64(scalar: ColumnData.Scalar, index: usize) ?f64 {
 		.f64 => |vc| return vc[index],
 		.decimal => |vc| {
 			const value = switch (vc.internal) {
-				inline else => |internal| hugeInt(internal[index]),
+				inline else => |internal| lib.hugeInt(internal[index]),
 			};
 			return c.duckdb_decimal_to_double(c.duckdb_decimal{
 				.width = vc.width,
@@ -492,25 +492,18 @@ pub const ListInfo = struct {
 	type: ParameterType,
 };
 
-pub fn hugeInt(value: i128) c.duckdb_hugeint {
-	return .{
-		.lower = @intCast(@mod(value, 18446744073709551616)),
-		.upper = @intCast(@divFloor(value, 18446744073709551616)),
-	};
-}
-
 const t = std.testing;
 // Test this specifically since there's special handling based on the length
 // of the column (inlined vs pointer)
 test "read varchar" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ(\\
+		var rows = try conn.query(\\
 			\\ select '1' union all
 			\\ select '12345' union all
 			\\ select '123456789A' union all
@@ -520,7 +513,7 @@ test "read varchar" {
 			\\ select '123456789ABCDE' union all
 			\\ select '123456789ABCDEF' union all
 			\\ select null
-		, .{}).ok;
+		, .{});
 		defer rows.deinit();
 
 		try t.expectEqualStrings("1", (try rows.next()).?.get([]const u8, 0).?);
@@ -539,19 +532,19 @@ test "read varchar" {
 // Test this specifically since there's special handling based on the length
 // of the column (inlined vs pointer)
 test "read blob" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ(\\
+		var rows = try conn.query(\\
 			\\ select '\xAA'::blob union all
 			\\ select '\xAA\xAA\xAA\xAA\xAB'::blob union all
 			\\ select '\xAA\xAA\xAA\xAA\xAB\xAA\xAA\xAA\xAA\xAB\xAA\xAA\xAA\xAA\xAB'::blob union all
 			\\ select null
-		, .{}).ok;
+		, .{});
 		defer rows.deinit();
 
 		try t.expectEqualSlices(u8, @as([]const u8, &.{170}), (try rows.next()).?.get([]const u8, 0).?);
@@ -563,14 +556,14 @@ test "read blob" {
 }
 
 test "read ints" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ(\\
+		var rows = try conn.query(\\
 			\\ select 0::tinyint, 0::smallint, 0::integer, 0::bigint, 0::hugeint, 0::utinyint, 0::usmallint, 0::uinteger, 0::ubigint
 			\\ union all
 			\\ select 127::tinyint, 32767::smallint, 2147483647::integer, 9223372036854775807::bigint, 170141183460469231731687303715884105727::hugeint, 255::utinyint, 65535::usmallint, 4294967295::uinteger, 18446744073709551615::ubigint
@@ -578,7 +571,7 @@ test "read ints" {
 			\\ select -127::tinyint, -32767::smallint, -2147483647::integer, -9223372036854775807::bigint, -170141183460469231731687303715884105727::hugeint, 0::utinyint, 0::usmallint, 0::uinteger, 0::ubigint
 			\\ union all
 			\\ select null, null, null, null, null, null, null, null, null
-		, .{}).ok;
+		, .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -626,14 +619,14 @@ test "read ints" {
 }
 
 test "read bool" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ("select 0::bool, 1::bool, null::bool", .{}).ok;
+		var rows = try conn.query("select 0::bool, 1::bool, null::bool", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -646,14 +639,14 @@ test "read bool" {
 }
 
 test "read float" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ("select 32.329::real, -0.29291::double, null::real, null::double", .{}).ok;
+		var rows = try conn.query("select 32.329::real, -0.29291::double, null::real, null::double", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -667,15 +660,15 @@ test "read float" {
 }
 
 test "read decimal" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
 		// decimals (representation is different based on the width)
-		var rows = conn.query("select 1.23::decimal(3,2), 1.24::decimal(8, 4), 1.25::decimal(12, 5), 1.26::decimal(18, 3), 1.27::decimal(35, 4)", .{}).ok;
+		var rows = try conn.query("select 1.23::decimal(3,2), 1.24::decimal(8, 4), 1.25::decimal(12, 5), 1.26::decimal(18, 3), 1.27::decimal(35, 4)", .{});
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
@@ -688,14 +681,14 @@ test "read decimal" {
 }
 
 test "read date & time" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ("select date '1992-09-20', time '14:21:13.332', timestamp '1993-10-21 11:30:02'", .{}).ok;
+		var rows = try conn.query("select date '1992-09-20', time '14:21:13.332', timestamp '1993-10-21 11:30:02'", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -706,16 +699,16 @@ test "read date & time" {
 }
 
 test "read list" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-	conn.execZ("create type my_type as enum ('type_a', 'type_b')") catch unreachable;
+	_ = try conn.exec("create type my_type as enum ('type_a', 'type_b')", .{});
 
 	{
-		var rows = conn.queryZ("select [1, 32, 99, null, -4]::int[]", .{}).ok;
+		var rows = try conn.query("select [1, 32, 99, null, -4]::int[]", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -731,7 +724,7 @@ test "read list" {
 	}
 
 	{
-		var rows = conn.queryZ("select ['tag1', null, 'tag2']::varchar[]", .{}).ok;
+		var rows = try conn.query("select ['tag1', null, 'tag2']::varchar[]", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -744,7 +737,7 @@ test "read list" {
 	}
 
 	{
-		var rows = conn.queryZ("select ['tag1', null, 'tag2']::varchar[]", .{}).ok;
+		var rows = try conn.query("select ['tag1', null, 'tag2']::varchar[]", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -757,7 +750,7 @@ test "read list" {
 	}
 
 	{
-		var rows = conn.queryZ("select ['type_a', null, 'type_b', 'type_a']::my_type[]", .{}).ok;
+		var rows = try conn.query("select ['type_a', null, 'type_b', 'type_a']::my_type[]", .{});
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
@@ -773,20 +766,20 @@ test "read list" {
 
 // There's some internal caching with this, so we need to test mulitple rows
 test "read enum" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-	conn.execZ("create type my_type as enum ('type_a', 'type_b')") catch unreachable;
-	conn.execZ("create type tea_type as enum ('keemun', 'silver_needle')") catch unreachable;
+	_ = try conn.exec("create type my_type as enum ('type_a', 'type_b')", .{});
+	_ = try conn.exec("create type tea_type as enum ('keemun', 'silver_needle')", .{});
 
-	var rows = conn.queryZ(
+	var rows = try conn.query(
 		\\ select 'type_a'::my_type, 'type_b'::my_type, null::my_type, 'type_a'::my_type, 'keemun'::tea_type, 'silver_needle'::tea_type, null::tea_type, 'silver_needle'::tea_type
 		\\ union all
 		\\ select 'type_b'::my_type, null::my_type, 'type_a'::my_type, 'type_b'::my_type, 'keemun'::tea_type, 'silver_needle'::tea_type, null::tea_type, 'silver_needle'::tea_type
-	, .{}).ok;
+	, .{});
 	defer rows.deinit();
 
 	var row = (try rows.next()) orelse unreachable;
@@ -811,42 +804,40 @@ test "read enum" {
 }
 
 test "owning row" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
 		// error case
-		const result = conn.row("select x", .{});
-		defer result.deinit();
-		try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", result.err.desc);
+		try t.expectError(error.DuckDBError, conn.row("select x", .{}));
+		try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", conn.err.?);
 	}
 
 	{
 		// null
-		const result = conn.row("select 1 where false", .{});
-		defer result.deinit();
-		try t.expectEqual(@as(?OwningRow, null), result.ok);
+		const row = try conn.row("select 1 where false", .{});
+		try t.expectEqual(@as(?OwningRow, null), row);
 	}
 
 	{
-		const row = (try conn.rowZ("select $1::bigint", .{-991823891832}).unwrap()).?;
+		const row = (try conn.row("select $1::bigint", .{-991823891832})) orelse unreachable;
 		defer row.deinit();
 		try t.expectEqual(@as(i64, -991823891832), row.get(i64, 0).?);
 	}
 }
 
 test "row: toMap" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.queryZ(
+		var rows = try conn.query(
 			\\ select true as the_truth, false as not_the_truth, null::bool as n_truth,
 			\\
 			\\   32.329::real as a, -0.29291::double as b, null::real as c, null::double as d,
@@ -872,7 +863,7 @@ test "row: toMap" {
 			\\   '23:03:45'::time as tme, null::time as ntme,
 			\\
 			\\   '2023-06-18 22:24:42.123Z'::timestamp as tz, null::timestamp as ntz
-		, .{}).ok;
+		, .{});
 		defer rows.deinit();
 
 		var mp = try rows.mapBuilder(t.allocator);

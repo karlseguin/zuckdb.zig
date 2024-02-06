@@ -1,49 +1,42 @@
 const std = @import("std");
-const zuckdb = @import("zuckdb.zig");
-const c = @cImport(@cInclude("zuckdb.h"));
+const lib = @import("lib.zig");
 
-const DB = @import("db.zig").DB;
-const Rows = @import("rows.zig").Rows;
-const Result = @import("result.zig").Result;
+const c = lib.c;
+const Conn = lib.Conn;
+const Rows = lib.Rows;
 
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
-const hugeInt = @import("row.zig").hugeInt;
-
-const RESULT_SIZEOF = c.result_sizeof;
-const RESULT_ALIGNOF = c.result_alignof;
-const STATEMENT_SIZEOF = c.statement_sizeof;
-const STATEMENT_ALIGNOF = c.statement_alignof;
-
-const UUID = zuckdb.UUID;
-const Time = zuckdb.Time;
-const Date = zuckdb.Date;
-const Interval = zuckdb.Interval;
+const UUID = lib.UUID;
+const Time = lib.Time;
+const Date = lib.Date;
+const Interval = lib.Interval;
+const ParameterType = lib.ParameterType;
 
 pub const Stmt = struct {
-	cached: bool,
-	allocator: Allocator,
+	conn: *Conn,
+	auto_release: bool,
 	stmt: *c.duckdb_prepared_statement,
 
-	pub fn init(allocator: Allocator, stmt: *c.duckdb_prepared_statement, cached: bool) Stmt {
+	pub const Opts = struct {
+		auto_release: bool = false,
+	};
+
+	pub fn init(stmt: *c.duckdb_prepared_statement, conn: *Conn, opts: Opts) Stmt {
 		return .{
+			.conn = conn,
 			.stmt = stmt,
-			.cached = cached,
-			.allocator = allocator,
+			.auto_release = opts.auto_release,
 		};
 	}
 
 	pub fn deinit(self: Stmt) void {
 		const stmt = self.stmt;
-		if (self.cached) {
-			_ = c.duckdb_clear_bindings(stmt.*);
-		} else {
-			c.duckdb_destroy_prepare(stmt);
-			const ptr: [*]align(STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
-			const slice = ptr[0..STATEMENT_SIZEOF];
-			self.allocator.free(slice);
-		}
+		c.duckdb_destroy_prepare(stmt);
+		const ptr: [*]align(lib.STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
+		const slice = ptr[0..lib.STATEMENT_SIZEOF];
+		self.conn.allocator.free(slice);
 	}
 
 	pub fn bind(self: Stmt, values: anytype) !void {
@@ -57,29 +50,19 @@ pub const Stmt = struct {
 		_ = try bindValue(@TypeOf(value), self.stmt.*, value, i+1);
 	}
 
-	pub fn executeOwned(self: Stmt, state: anytype, owned: bool) Result(Rows) {
-		const allocator = self.allocator;
-		const slice = allocator.alignedAlloc(u8, RESULT_ALIGNOF, RESULT_SIZEOF) catch |err| {
-			return Result(Rows).allocErr(err, if (owned) .{.stmt = self} else .{});
-		};
+	pub fn execute(self: *Stmt, state: anytype) !Rows {
+		const conn = self.conn;
+		const allocator = conn.allocator;
 
+		const slice = try allocator.alignedAlloc(u8, lib.RESULT_ALIGNOF, lib.RESULT_SIZEOF);
+		errdefer allocator.free(slice);
 		const result: *c.duckdb_result = @ptrCast(slice.ptr);
-		if (c.duckdb_execute_prepared(self.stmt.*, result) == DuckDBError) {
-			return Result(Rows).resultErr(allocator, if (owned) self else null, result);
-		}
-		return Rows.init(allocator, if (owned) self else null, result, state);
-	}
 
-	// When stmt is executed from conn.query or conn.cachedQuery, the application
-	// never iteracts with Stmt directly, and thus the returning rows/error "owns"
-	// the stmt (so they have to call stmt.deinit). conn.query and conn.cachedQuery
-	// call stmt.executeOwned(state, true) to inidicate that the returned rows/err
-	// own the statement.
-	// When stmt is called explicitly, with this function, it is assumed that the
-	// application owns stmt and is responsible for deinit'ing. This happens
-	// when the application explictily calls prepare or prepareCache.
-	pub fn execute(self: Stmt, state: anytype) Result(Rows) {
-		return self.executeOwned(state, false);
+		if (c.duckdb_execute_prepared(self.stmt.*, result) == DuckDBError) {
+			try self.conn.duckdbError(c.duckdb_result_error(result));
+			return error.DuckDBError;
+		}
+		return Rows.init(allocator, if (self.auto_release) self.stmt else null, result, state);
 	}
 
 	pub fn numberOfParameters(self: Stmt) usize {
@@ -90,8 +73,8 @@ pub const Stmt = struct {
 		return c.duckdb_param_type(self.stmt.*, i+1);
 	}
 
-	pub fn parameterType(self: Stmt, i: usize) zuckdb.ParameterType {
-		return zuckdb.ParameterType.fromDuckDBType(self.parameterTypeC(i));
+	pub fn parameterType(self: Stmt, i: usize) ParameterType {
+		return ParameterType.fromDuckDBType(self.parameterTypeC(i));
 	}
 };
 
@@ -109,7 +92,7 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 					17...32 => rc = c.duckdb_bind_int32(stmt, bind_index, @intCast(value)),
 					33...63 => rc = c.duckdb_bind_int64(stmt, bind_index, @intCast(value)),
 					64 => rc = bindI64(stmt, bind_index, value),
-					65...128 => rc = c.duckdb_bind_hugeint(stmt, bind_index, hugeInt(@intCast(value))),
+					65...128 => rc = c.duckdb_bind_hugeint(stmt, bind_index, lib.hugeInt(@intCast(value))),
 					else => bindError(T),
 				}
 			} else {
@@ -199,21 +182,22 @@ fn bindError(comptime T: type) void {
 }
 
 const t = std.testing;
-test "binding: basic types" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+const DB = @import("db.zig").DB;
+test "bind: basic types" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-	var rows = conn.query("select $1, $2, $3, $4, $5, $6", .{
+	var rows = try conn.query("select $1, $2, $3, $4, $5, $6", .{
 		99,
 		-32.01,
 		true,
 		false,
 		@as(?i32, null),
 		@as(?i32, 44),
-	}).ok;
+	});
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
@@ -225,22 +209,22 @@ test "binding: basic types" {
 	try t.expectEqual(@as(i32, 44), row.get(i32, 5).?);
 }
 
-test "binding: int" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: int" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var rows = conn.query("select $1, $2, $3, $4, $5, $6::hugeint", .{
+		var rows = try conn.query("select $1, $2, $3, $4, $5, $6::hugeint", .{
 			99,
 			@as(i8, 2),
 			@as(i16, 3),
 			@as(i32, 4),
 			@as(i64, 5),
 			@as(i128, -9955340232221457974987)
-		}).ok;
+		});
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
@@ -254,13 +238,13 @@ test "binding: int" {
 
 	{
 		// positive limit
-		var rows = conn.query("select $1, $2, $3, $4, $5", .{
+		var rows = try conn.query("select $1, $2, $3, $4, $5", .{
 			@as(i8, 127),
 			@as(i16, 32767),
 			@as(i32, 2147483647),
 			@as(i64, 9223372036854775807),
 			@as(i128, 170141183460469231731687303715884105727)
-		}).ok;
+		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqual(@as(i8, 127), row.get(i8, 0).?);
@@ -272,13 +256,13 @@ test "binding: int" {
 
 	{
 		// negative limit
-		var rows = conn.query("select $1, $2, $3, $4, $5", .{
+		var rows = try conn.query("select $1, $2, $3, $4, $5", .{
 			@as(i8, -127),
 			@as(i16, -32767),
 			@as(i32, -2147483647),
 			@as(i64, -9223372036854775807),
 			@as(i128, -170141183460469231731687303715884105727)
-		}).ok;
+		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqual(@as(i8, -127), row.get(i8, 0).?);
@@ -290,12 +274,12 @@ test "binding: int" {
 
 	{
 		// unsigned positive limit
-		var rows = conn.query("select $1, $2, $3, $4", .{
+		var rows = try conn.query("select $1, $2, $3, $4", .{
 			@as(u8, 255),
 			@as(u16, 65535),
 			@as(u32, 4294967295),
 			@as(u64, 18446744073709551615),
-		}).ok;
+		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqual(@as(u8, 255), row.get(u8, 0).?);
@@ -305,19 +289,19 @@ test "binding: int" {
 	}
 }
 
-test "binding: floats" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: floats" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	// floats
-	var rows = conn.query("select $1, $2, $3", .{
+	var rows = try conn.query("select $1, $2, $3", .{
 		99.88, // $1
 		@as(f32, -3.192), // $2
 		@as(f64, 999.182), // $3
-	}).ok;
+	});
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
@@ -326,18 +310,18 @@ test "binding: floats" {
 	try t.expectEqual(@as(f64, 999.182), row.get(f64, 2).?);
 }
 
-test "binding: decimal" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: decimal" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	// decimal
-	var rows = conn.query("select $1::decimal(3,2), $2::decimal(18,6)", .{
+	var rows = try conn.query("select $1::decimal(3,2), $2::decimal(18,6)", .{
 		1.23, // $1
 		-0.3291484 // $2
-	}).ok;
+	});
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
@@ -345,15 +329,15 @@ test "binding: decimal" {
 	try t.expectEqual(@as(f64, -0.329148), row.get(f64, 1).?);
 }
 
-test "binding: uuid" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: uuid" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	// uuid
-	var rows = conn.query("select $1::uuid, $2::uuid, $3::uuid, $4::uuid", .{"578D0DF0-A76F-4A8E-A463-42F8A4F133C8", "00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"}).ok;
+	var rows = try conn.query("select $1::uuid, $2::uuid, $3::uuid, $4::uuid", .{"578D0DF0-A76F-4A8E-A463-42F8A4F133C8", "00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"});
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
@@ -363,21 +347,16 @@ test "binding: uuid" {
 	try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 3).?));
 }
 
-test "binding: text" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: text" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	{
-		var result = conn.query("select $1", .{"hello world"});
-		defer result.deinit();
-		var rows = switch(result) {
-			.ok => |rows| rows,
-			.err => |err| @panic(err.desc),
-		};
-
+		var rows = try conn.query("select $1", .{"hello world"});
+		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqualStrings("hello world", row.get([]u8, 0).?);
 	}
@@ -388,7 +367,7 @@ test "binding: text" {
 		defer list.deinit();
 		try list.append("i love keemun");
 
-		var rows = conn.query("select $1::varchar", .{list.items[0]}).ok;
+		var rows = try conn.query("select $1::varchar", .{list.items[0]});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqualStrings("i love keemun", row.get([]const u8, 0).?);
@@ -396,7 +375,7 @@ test "binding: text" {
 
 	{
 		// blob
-		var rows = conn.query("select $1::blob", .{&[_]u8{0, 1, 2}}).ok;
+		var rows = try conn.query("select $1::blob", .{&[_]u8{0, 1, 2}});
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
@@ -409,25 +388,25 @@ test "binding: text" {
 		defer list.deinit();
 		try list.append("i love keemun2");
 
-		var rows = conn.query("select $1::blob", .{list.items[0]}).ok;
+		var rows = try conn.query("select $1::blob", .{list.items[0]});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
 		try t.expectEqualStrings("i love keemun2", row.get([]const u8, 0).?);
 	}
 }
 
-test "binding: date/time" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: date/time" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
 	// date & time
 	const date = Date{.year = 2023, .month = 5, .day = 10};
 	const time = Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456};
 	const interval = Interval{.months = 3, .days = 7, .micros = 982810};
-	var rows = conn.query("select $1::date, $2::time, $3::timestamp, $4::interval, $5::interval", .{date, time, 751203002000000, interval, "9298392 days"}).ok;
+	var rows = try conn.query("select $1::date, $2::time, $3::timestamp, $4::interval, $5::interval", .{date, time, 751203002000000, interval, "9298392 days"});
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
@@ -438,17 +417,17 @@ test "binding: date/time" {
 	try t.expectEqual(Interval{.months = 0, .days = 9298392, .micros = 0}, row.get(Interval, 4).?);
 }
 
-test "binding: enum" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: enum" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-	conn.execZ("create type my_type as enum ('type_a', 'type_b')") catch unreachable;
-	conn.execZ("create type tea_type as enum ('keemun', 'silver_needle')") catch unreachable;
+	_ = try conn.exec("create type my_type as enum ('type_a', 'type_b')", .{});
+	_ = try conn.exec("create type tea_type as enum ('keemun', 'silver_needle')", .{});
 
-	var rows = conn.queryZ("select $1::my_type, $2::tea_type, $3::my_type", .{"type_a", "keemun", null}).ok;
+	var rows = try conn.query("select $1::my_type, $2::tea_type, $3::my_type", .{"type_a", "keemun", null});
 	defer rows.deinit();
 	const row = (try rows.next()).?;
 	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
@@ -456,15 +435,14 @@ test "binding: enum" {
 	try t.expectEqual(@as(?[]const u8, null), try row.getEnum(2));
 }
 
-test "binding: bistring" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: bistring" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-
-	var rows = conn.queryZ(
+	var rows = try conn.query(
 		\\ select $1::bit, $1::bit::varchar union all
 		\\ select $2::bit, $2::bit::varchar union all
 		\\ select $3::bit, $3::bit::varchar union all
@@ -474,35 +452,54 @@ test "binding: bistring" {
 		\\ select $7::bit, $7::bit::varchar union all
 		\\ select $8::bit, $8::bit::varchar union all
 		\\ select $9::bit, $9::bit::varchar
-	, .{"0", "1", "0001111", "010", "101", "1111111110", "101010101010010101010100000101001001", "00000000000000000", "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111011111111111111111111111111111111111"}).ok;
+	, .{"0", "1", "0001111", "010", "101", "1111111110", "101010101010010101010100000101001001", "00000000000000000", "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111011111111111111111111111111111111111"});
 	defer rows.deinit();
 
 	// check that our toString is the same as duckdb's
 	while (try rows.next()) |row| {
-		const converted = try zuckdb.bitToString(t.allocator, row.get([]u8, 0).?);
+		const converted = try @import("zuckdb.zig").bitToString(t.allocator, row.get([]u8, 0).?);
 		defer t.allocator.free(converted);
 		try t.expectEqualStrings(row.get([]u8, 1).?, converted);
 	}
 }
 
-test "query parameters" {
-	const ParameterType = zuckdb.ParameterType;
-
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
+test "bind: dynamic" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
-	const conn = try db.conn();
+	var conn = try db.conn();
 	defer conn.deinit();
 
-	const stmt = conn.prepareZ(\\select
+	var stmt = try conn.prepare("select $1::int, $2::varchar, $3::smallint", .{});
+	defer stmt.deinit();
+	try stmt.bindDynamic(0, null);
+	try stmt.bindDynamic(1, "over");
+	try stmt.bindDynamic(2, 9000);
+
+	var rows = try stmt.execute(null);
+	defer rows.deinit();
+
+	const row = (try rows.next()).?;
+	try t.expectEqual(@as(?i32, null), row.get(i32, 0));
+	try t.expectEqualStrings("over", row.get([]u8, 1).?);
+	try t.expectEqual(@as(i16, 9000), row.get(i16, 2).?);
+}
+
+test "query parameters" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	const stmt = try conn.prepare(\\select
 		\\ $1::bool,
 		\\ $2::tinyint, $3::smallint, $4::integer, $5::bigint, $6::hugeint,
 		\\ $7::utinyint, $8::usmallint, $9::uinteger, $10::ubigint,
 		\\ $11::real, $12::double, $13::decimal,
 		\\ $14::timestamp, $15::date, $16::time, $17::interval,
 		\\ $18::varchar, $19::blob
-	).ok;
-
+	, .{.auto_release = false});
 	defer stmt.deinit();
 
 	try t.expectEqual(@as(usize, 19), stmt.numberOfParameters());
@@ -556,26 +553,4 @@ test "query parameters" {
 	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
 	try t.expectEqual(@as(usize, 18), stmt.parameterTypeC(18));
 	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
-}
-
-test "bindDynamic" {
-	const db = DB.init(t.allocator, ":memory:", .{}).ok;
-	defer db.deinit();
-
-	const conn = try db.conn();
-	defer conn.deinit();
-
-	const stmt = conn.prepareZ("select $1::int, $2::varchar, $3::smallint").ok;
-	defer stmt.deinit();
-	try stmt.bindDynamic(0, null);
-	try stmt.bindDynamic(1, "over");
-	try stmt.bindDynamic(2, 9000);
-
-	var rows = stmt.execute(null).ok;
-	defer rows.deinit();
-
-	const row = (try rows.next()).?;
-	try t.expectEqual(@as(?i32, null), row.get(i32, 0));
-	try t.expectEqualStrings("over", row.get([]u8, 1).?);
-	try t.expectEqual(@as(i16, 9000), row.get(i16, 2).?);
 }
