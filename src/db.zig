@@ -30,7 +30,6 @@ pub const DB = struct{
 		};
 	};
 
-
 	pub fn init(allocator: Allocator, path: anytype, db_config: Config) !DB {
 		const str = try lib.stringZ(path, allocator);
 		defer str.deinit(allocator);

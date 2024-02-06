@@ -2,52 +2,22 @@ Zig driver for DuckDB.
 
 # Quick Example
 ```zig
-const db = switch (zuckdb.DB.init(allocator, "/tmp/db.duck", .{})) {
-    .ok => |db| db,
-    .err => |err| {
-        std.debug.print("Failed to open DB: {s}\n", .{err.desc});
-        err.deinit();
-        return error.DBOpenFailure;
-    }
-}
+const db = try zuckdb.DB.init(allocator, "/tmp/db.duck", .{});
 defer db.deinit();
 
-const conn = try db.conn();
+var conn = try db.conn();
 defer conn.deinit();
 
 {
-    // exec takes a null terminated string and does not support parameters
-    // it is micro-optimized for simple cases.
-    try conn.exec("create table users(id int)");
+    // for insert/update/delete returns the # changed rows
+    // returns 0 for other statements
+    _ = try conn.exec("create table users(id int)", .{});
 }
 
 {
-    const rows = switch (conn.query("insert into users (id) values ($1)", .{1})) {
-        ok => |rows| rows,
-        err => |err| => {
-            std.debug.print("failed to insert: {s}\n", .{err.desc});
-            // Important to note that even the error needs to be deinit'd
-            err.deinit();
-            return error.Failure;
-        },
-    }
+    const rows = try conn.query("select * from users", .{});
     defer rows.deinit();
 
-    // Since this is an insert, only rows.changed() is useful:
-    std.debug.print("inserted {d} row(s)\n", .{rows.rowsChanged()});
-}
-
-
-{
-    const rows = switch (conn.query("select * from users", .{});) {
-        ok => |rows| rows,
-        err => |err| => {
-            std.debug.print("failed to select: {s}\n", .{err.desc});
-            err.deinit();
-            return error.Failure;
-        },
-    }
-    defer rows.deinit();
     while (try rows.next()) |row| {
         // get the 0th column of the current row
         const id = row.get(i32, 0);
@@ -56,66 +26,48 @@ defer conn.deinit();
 }
 ```
 
-When fetching data from a `row`, data is only valid until the next call to `next` or `deinit`:
+Any non-primitive value that you get from the `row` are valid only until the next call to `next` or `deinit`.
 
+## Install
+1) Add into `dependencies` at `build.zig.zon`:
 ```zig
-// assume we have rows from a "select name from users";
-
-defer rows.deinit();
-
-// we'll collect the names in here
-const names = std.ArrayList([]const u8).init(allocator);
-
-while (rows.next()) |row| {
-    // name is not null
-    const name = row.get([]u8, 0).?; 
-
-    // we need to dupe the string value to own it beyond this block
-    try names.append(try allocator.dupe(u8, name));
-}
+.dependencies = .{
+    ...
+    .zqlite = .{
+        .url = "git+https://github.com/karlseguin/zqlite.zig#master",
+        .hash = {{ actual_hash string, remove this line before 'zig build' to get actual hash }},
+    },
+},
+```
+2) Add this in `build.zig`:
+```zig
+const zqlite = b.dependency("zqlite", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zqlite", zqlite.module("pg"));
 ```
 
-
-## Query and Exec
-
-`query` and `exec` are the two primary functions used to run queries. The `queryZ` and `execZ` versions are optimized when the 1st parameter (the sql string) is known to be null-terminated (so you should favor using `execZ` or `queryZ` if you have a static SQL string). `exec` and `execZ` do not accept SQL parameters and only returns an `!void` (i.e. no detailed message, no rows), but will run slightly faster.
-
-You'll notice that the library does not use idiomatic error sets, but rather Rust-like results. This was done so that the error message could be exposed. As a consequence, you'll also notice that `deinit` must be called on BOTH the `ok` and `err` values. There are two options to deal with this. In the above example, `deinit` is called in both cases:
+## Errors
+A call that returns an `error.DuckDBError` will have the `conn.err` field set to an error description:
 
 ```zig
-const rows = switch(conn.query("...", .{})) {
-    .ok => |rows| rows,
-    .err => {
-        std.debug.print("{s}\n", .{err.desc});
-        // err result is freed here, _after_ err.desc is used
-        err.deinit();
-        return error.Fail;
+const rows = conn.query("....", .{}) catch |err| {
+  if (err == error.DuckDBError) {
+    if (conn.err) |derr| {
+      std.log.err("DuckDB {s}\n", .{derr});
     }
+  }
+  return err;
 }
-// ok result is freed here
-defer rows.deinit()
 ```
 
-Alternatively, `deinit` can be called on the result itself:
+In the above snippet, it's possible to skip the if (err == error.DuckDBError) check, but in that case conn.err could be set from some previous command (conn.err is always reset when acquired from the pool).
 
-```zig
-const result = conn.query("...", .{});
-// CALLED HERE
-defer result.deinit();
-
-const rows = switch() {
-    .ok => |rows| rows,
-    .err => {
-        std.debug.print("{s}\n", .{err.desc});
-        return error.Fail;
-    }
-}
-
-// should NOT call rows.deinit()
-```
+If error.DuckDBError is returned from a non-connection object, like a query result, the associated connection will have its conn.err set. In other words, conn.err is the only thing you ever have to check.
 
 ## Rows and Row
-The `rows` returned from the `ok` case of a `query` exposes the following methods:
+The `rows` returned from `conn.squery` exposes the following methods:
 
 * `count()` - the number of rows in the result
 * `changed()` - the number of updated/deleted/inserted rows
@@ -168,35 +120,33 @@ const category = (try row.getEnum(3)) orelse "default";
 The `zuckdb.Pool` is a thread-safe connection pool:
 
 ```zig
-const db = zuckdb.DB.init(allocator, "/tmp/duckdb.zig.test", .{}).ok;
+const db = try zuckdb.DB.init(allocator, "/tmp/duckdb.zig.test", .{});
 var pool = db.pool(.{
     .size = 2,
     .on_connection = &connInit,
     .on_first_connection = &poolInit,
-}).ok;
+});
 defer pool.deinit();
 
-const conn = pool.acquire();
+var conn = pool.acquire();
 defer pool.release(conn);
 ```
 
-The Pool takes ownership of the DB object, thus `db.deinit` does not need to be called. In the above code, the DB result and Pool result are dangerously unwrapped directly into `ok` - this will panic if either returns an `.err`.
-
-The `on_connection` and `on_first_connection` are optional callbacks. They both have the same signature:
+The Pool takes ownership of the DB object, thus `db.deinit` does not need to be called.The `on_connection` and `on_first_connection` are optional callbacks. They both have the same signature:
 
 ```zig
-?*const fn(conn: Conn) anyerror!void
+?*const fn(conn: *Conn) anyerror!void
 ```
 
 If both are specific, the first initialized connection will first be passed to `on_first_connection` and then to `on_connection`.
 
 # Query Optimizations
-In very tight loops, performance might be improved by providing a stack-based state for the query logic to use. The `query`, `queryZ`, `row`, `rowZ`, `queryCache` and `queryCacheZ` functions all have a `WithState` alternative, e.g.: `queryZWithState`. These functions take 1 additional "query state" parameter:
+In very tight loops, performance might be improved by providing a stack-based state for the query logic to use. The `query` and `row` functions all have a `WithState` alternative, e.g.: `queryWithState`. These functions take 1 additional "query state" parameter:
 
 ```zig
 var state = zuckdb.StaticState(2){};
-var query_result = conn.queryCacheWithState(SQL, .{ARGS}, &state);
-// use query_result normally
+var rows = try conn.queryWithState(SQL, .{ARGS}, &state);
+// use rows normally
 ```
 
 The value passed to `zuckdb.StaticState` is the number of columns returned by the query. The `state` must remain valid while the query is used.
