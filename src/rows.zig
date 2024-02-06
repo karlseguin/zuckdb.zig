@@ -336,7 +336,7 @@ test "query column names" {
 	const rows = try conn.query("select id, name from test", .{});
 	defer rows.deinit();
 
-	try t.expectEqual(@as(usize, 2), rows.column_count);
+	try t.expectEqual(2, rows.column_count);
 	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
 	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
 }

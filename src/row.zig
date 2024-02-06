@@ -524,8 +524,8 @@ test "read varchar" {
 		try t.expectEqualStrings("123456789ABCD", (try rows.next()).?.get([]const u8, 0).?);
 		try t.expectEqualStrings("123456789ABCDE", (try rows.next()).?.get([]const u8, 0).?);
 		try t.expectEqualStrings("123456789ABCDEF", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqual(@as(?[]const u8, null), (try rows.next()).?.get([]const u8, 0));
-		try t.expectEqual(@as(?Row, null), try rows.next());
+		try t.expectEqual(null, (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqual(null, try rows.next());
 	}
 }
 
@@ -550,8 +550,8 @@ test "read blob" {
 		try t.expectEqualSlices(u8, @as([]const u8, &.{170}), (try rows.next()).?.get([]const u8, 0).?);
 		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0).?);
 		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171, 170, 170, 170, 170, 171, 170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqual(@as(?[]const u8, null), (try rows.next()).?.get([]const u8, 0));
-		try t.expectEqual(@as(?Row, null), try rows.next());
+		try t.expectEqual(null, (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqual(null, try rows.next());
 	}
 }
 
@@ -575,46 +575,46 @@ test "read ints" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(i8, 0), row.get(i8, 0).?);
-		try t.expectEqual(@as(i16, 0), row.get(i16,1).?);
-		try t.expectEqual(@as(i32, 0), row.get(i32, 2).?);
-		try t.expectEqual(@as(i64, 0), row.get(i64, 3).?);
-		try t.expectEqual(@as(i128, 0), row.get(i128, 4).?);
-		try t.expectEqual(@as(u8, 0), row.get(u8, 5).?);
-		try t.expectEqual(@as(u16, 0), row.get(u16, 6).?);
-		try t.expectEqual(@as(u32, 0), row.get(u32, 7).?);
-		try t.expectEqual(@as(u64, 0), row.get(u64, 8).?);
+		try t.expectEqual(0, row.get(i8, 0).?);
+		try t.expectEqual(0, row.get(i16,1).?);
+		try t.expectEqual(0, row.get(i32, 2).?);
+		try t.expectEqual(0, row.get(i64, 3).?);
+		try t.expectEqual(0, row.get(i128, 4).?);
+		try t.expectEqual(0, row.get(u8, 5).?);
+		try t.expectEqual(0, row.get(u16, 6).?);
+		try t.expectEqual(0, row.get(u32, 7).?);
+		try t.expectEqual(0, row.get(u64, 8).?);
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(i8, 127), row.get(i8, 0).?);
-		try t.expectEqual(@as(i16, 32767), row.get(i16,1).?);
-		try t.expectEqual(@as(i32, 2147483647), row.get(i32, 2).?);
-		try t.expectEqual(@as(i64, 9223372036854775807), row.get(i64, 3).?);
-		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), row.get(i128, 4).?);
-		try t.expectEqual(@as(u8, 255), row.get(u8, 5).?);
-		try t.expectEqual(@as(u16, 65535), row.get(u16, 6).?);
-		try t.expectEqual(@as(u32, 4294967295), row.get(u32, 7).?);
-		try t.expectEqual(@as(u64, 18446744073709551615), row.get(u64, 8).?);
+		try t.expectEqual(127, row.get(i8, 0).?);
+		try t.expectEqual(32767, row.get(i16,1).?);
+		try t.expectEqual(2147483647, row.get(i32, 2).?);
+		try t.expectEqual(9223372036854775807, row.get(i64, 3).?);
+		try t.expectEqual(170141183460469231731687303715884105727, row.get(i128, 4).?);
+		try t.expectEqual(255, row.get(u8, 5).?);
+		try t.expectEqual(65535, row.get(u16, 6).?);
+		try t.expectEqual(4294967295, row.get(u32, 7).?);
+		try t.expectEqual(18446744073709551615, row.get(u64, 8).?);
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(i8, -127), row.get(i8, 0).?);
-		try t.expectEqual(@as(i16, -32767), row.get(i16,1).?);
-		try t.expectEqual(@as(i32, -2147483647), row.get(i32, 2).?);
-		try t.expectEqual(@as(i64, -9223372036854775807), row.get(i64, 3).?);
-		try t.expectEqual(@as(i128, -170141183460469231731687303715884105727), row.get(i128, 4).?);
+		try t.expectEqual(-127, row.get(i8, 0).?);
+		try t.expectEqual(-32767, row.get(i16,1).?);
+		try t.expectEqual(-2147483647, row.get(i32, 2).?);
+		try t.expectEqual(-9223372036854775807, row.get(i64, 3).?);
+		try t.expectEqual(-170141183460469231731687303715884105727, row.get(i128, 4).?);
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(?i8, null), row.get(i8, 0));
-		try t.expectEqual(@as(?i16, null), row.get(i16,1));
-		try t.expectEqual(@as(?i32, null), row.get(i32, 2));
-		try t.expectEqual(@as(?i64, null), row.get(i64, 3));
-		try t.expectEqual(@as(?i128, null), row.get(i128, 4));
-		try t.expectEqual(@as(?u8, null), row.get(u8, 5));
-		try t.expectEqual(@as(?u16, null), row.get(u16, 6));
-		try t.expectEqual(@as(?u32, null), row.get(u32, 7));
-		try t.expectEqual(@as(?u64, null), row.get(u64, 8));
+		try t.expectEqual(null, row.get(i8, 0));
+		try t.expectEqual(null, row.get(i16,1));
+		try t.expectEqual(null, row.get(i32, 2));
+		try t.expectEqual(null, row.get(i64, 3));
+		try t.expectEqual(null, row.get(i128, 4));
+		try t.expectEqual(null, row.get(u8, 5));
+		try t.expectEqual(null, row.get(u16, 6));
+		try t.expectEqual(null, row.get(u32, 7));
+		try t.expectEqual(null, row.get(u64, 8));
 
-		try t.expectEqual(@as(?Row, null), try rows.next());
+		try t.expectEqual(null, try rows.next());
 	}
 }
 
@@ -632,9 +632,9 @@ test "read bool" {
 		var row = (try rows.next()) orelse unreachable;
 		try t.expectEqual(false, row.get(bool, 0).?);
 		try t.expectEqual(true, row.get(bool, 1).?);
-		try t.expectEqual(@as(?bool, null), row.get(bool, 2));
+		try t.expectEqual(null, row.get(bool, 2));
 
-		try t.expectEqual(@as(?Row, null), try rows.next());
+		try t.expectEqual(null, try rows.next());
 	}
 }
 
@@ -650,12 +650,12 @@ test "read float" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(@as(f32, 32.329), row.get(f32, 0).?);
-		try t.expectEqual(@as(f64, -0.29291), row.get(f64, 1).?);
-		try t.expectEqual(@as(?f32, null), row.get(f32, 2));
-		try t.expectEqual(@as(?f64, null), row.get(f64, 3));
+		try t.expectEqual(32.329, row.get(f32, 0).?);
+		try t.expectEqual(-0.29291, row.get(f64, 1).?);
+		try t.expectEqual(null, row.get(f32, 2));
+		try t.expectEqual(null, row.get(f64, 3));
 
-		try t.expectEqual(@as(?Row, null), try rows.next());
+		try t.expectEqual(null, try rows.next());
 	}
 }
 
@@ -672,11 +672,11 @@ test "read decimal" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(f64, 1.23), row.get(f64, 0).?);
-		try t.expectEqual(@as(f64, 1.24), row.get(f64, 1).?);
-		try t.expectEqual(@as(f64, 1.25), row.get(f64, 2).?);
-		try t.expectEqual(@as(f64, 1.26), row.get(f64, 3).?);
-		try t.expectEqual(@as(f64, 1.27), row.get(f64, 4).?);
+		try t.expectEqual(1.23, row.get(f64, 0).?);
+		try t.expectEqual(1.24, row.get(f64, 1).?);
+		try t.expectEqual(1.25, row.get(f64, 2).?);
+		try t.expectEqual(1.26, row.get(f64, 3).?);
+		try t.expectEqual(1.27, row.get(f64, 4).?);
 	}
 }
 
@@ -694,7 +694,7 @@ test "read date & time" {
 		var row = (try rows.next()) orelse unreachable;
 		try t.expectEqual(Date{.year = 1992, .month = 9, .day = 20}, row.get(Date, 0).?);
 		try t.expectEqual(Time{.hour = 14, .min = 21, .sec = 13, .micros = 332000}, row.get(Time, 1).?);
-		try t.expectEqual(@as(?i64, 751203002000000), row.get(i64, 2).?);
+		try t.expectEqual(751203002000000, row.get(i64, 2).?);
 	}
 }
 
@@ -715,12 +715,12 @@ test "read list" {
 
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.i32, list.type);
-		try t.expectEqual(@as(usize, 5), list.len);
-		try t.expectEqual(@as(i32, 1), list.get(i32, 0).?);
-		try t.expectEqual(@as(i32, 32), list.get(i32, 1).?);
-		try t.expectEqual(@as(i32, 99), list.get(i32, 2).?);
-		try t.expectEqual(@as(?i32, null), list.get(i32, 3));
-		try t.expectEqual(@as(i32, -4), list.get(i32, 4).?);
+		try t.expectEqual(5, list.len);
+		try t.expectEqual(1, list.get(i32, 0).?);
+		try t.expectEqual(32, list.get(i32, 1).?);
+		try t.expectEqual(99, list.get(i32, 2).?);
+		try t.expectEqual(null, list.get(i32, 3));
+		try t.expectEqual(-4, list.get(i32, 4).?);
 	}
 
 	{
@@ -730,9 +730,9 @@ test "read list" {
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.varchar, list.type);
-		try t.expectEqual(@as(usize, 3), list.len);
+		try t.expectEqual(3, list.len);
 		try t.expectEqualStrings("tag1", list.get([]u8, 0).?);
-		try t.expectEqual(@as(?[]const u8, null), list.get([]u8, 1));
+		try t.expectEqual(null, list.get([]u8, 1));
 		try t.expectEqualStrings("tag2", list.get([]u8, 2).?);
 	}
 
@@ -743,9 +743,9 @@ test "read list" {
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.varchar, list.type);
-		try t.expectEqual(@as(usize, 3), list.len);
+		try t.expectEqual(3, list.len);
 		try t.expectEqualStrings("tag1", list.get([]u8, 0).?);
-		try t.expectEqual(@as(?[]const u8, null), list.get([]u8, 1));
+		try t.expectEqual(null, list.get([]u8, 1));
 		try t.expectEqualStrings("tag2", list.get([]u8, 2).?);
 	}
 
@@ -756,9 +756,9 @@ test "read list" {
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.@"enum", list.type);
-		try t.expectEqual(@as(usize, 4), list.len);
+		try t.expectEqual(4, list.len);
 		try t.expectEqualStrings("type_a", (try list.getEnum(0)).?);
-		try t.expectEqual(@as(?[]const u8, null), try list.getEnum(1));
+		try t.expectEqual(null, try list.getEnum(1));
 		try t.expectEqualStrings("type_b", (try list.getEnum(2)).?);
 		try t.expectEqualStrings("type_a", (try list.getEnum(3)).?);
 	}
@@ -785,21 +785,21 @@ test "read enum" {
 	var row = (try rows.next()) orelse unreachable;
 	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
 	try t.expectEqualStrings("type_b", (try row.getEnum(1)).?);
-	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(2)));
+	try t.expectEqual(null, (try row.getEnum(2)));
 	try t.expectEqualStrings("type_a", (try row.getEnum(3)).?);
 	try t.expectEqualStrings("keemun", (try row.getEnum(4)).?);
 	try t.expectEqualStrings("silver_needle", (try row.getEnum(5)).?);
-	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(6)));
+	try t.expectEqual(null, (try row.getEnum(6)));
 	try t.expectEqualStrings("silver_needle", (try row.getEnum(7)).?);
 
 	row = (try rows.next()) orelse unreachable;
 	try t.expectEqualStrings("type_b", (try row.getEnum(0)).?);
-	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(1)));
+	try t.expectEqual(null, (try row.getEnum(1)));
 	try t.expectEqualStrings("type_a", (try row.getEnum(2)).?);
 	try t.expectEqualStrings("type_b", (try row.getEnum(3)).?);
 	try t.expectEqualStrings("keemun", (try row.getEnum(4)).?);
 	try t.expectEqualStrings("silver_needle", (try row.getEnum(5)).?);
-	try t.expectEqual(@as(?[]const u8, null), (try row.getEnum(6)));
+	try t.expectEqual(null, (try row.getEnum(6)));
 	try t.expectEqualStrings("silver_needle", (try row.getEnum(7)).?);
 }
 
@@ -819,13 +819,13 @@ test "owning row" {
 	{
 		// null
 		const row = try conn.row("select 1 where false", .{});
-		try t.expectEqual(@as(?OwningRow, null), row);
+		try t.expectEqual(null, row);
 	}
 
 	{
 		const row = (try conn.row("select $1::bigint", .{-991823891832})) orelse unreachable;
 		defer row.deinit();
-		try t.expectEqual(@as(i64, -991823891832), row.get(i64, 0).?);
+		try t.expectEqual(-991823891832, row.get(i64, 0).?);
 	}
 }
 
@@ -874,48 +874,48 @@ test "row: toMap" {
 
 		try t.expectEqual(true, m.get(bool, "the_truth").?);
 		try t.expectEqual(false, m.get(bool, "not_the_truth").?);
-		try t.expectEqual(@as(?bool, null), m.get(bool, "n_truth"));
+		try t.expectEqual(null, m.get(bool, "n_truth"));
 
-		try t.expectEqual(@as(f32, 32.329), m.get(f32, "a").?);
-		try t.expectEqual(@as(f64, -0.29291), m.get(f64, "b").?);
-		try t.expectEqual(@as(?f32, null), m.get(f32, "c"));
-		try t.expectEqual(@as(?f64, null), m.get(f64, "d"));
+		try t.expectEqual(32.329, m.get(f32, "a").?);
+		try t.expectEqual(-0.29291, m.get(f64, "b").?);
+		try t.expectEqual(null, m.get(f32, "c"));
+		try t.expectEqual(null, m.get(f64, "d"));
 
-		try t.expectEqual(@as(i8, 127), m.get(i8, "ti").?);
-		try t.expectEqual(@as(i16, -32767), m.get(i16, "si").?);
-		try t.expectEqual(@as(i32, 2147483647), m.get(i32, "nn").?);
-		try t.expectEqual(@as(i64, 9223372036854775807), m.get(i64, "bi").?);
-		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), m.get(i128, "hugn").?);
+		try t.expectEqual(127, m.get(i8, "ti").?);
+		try t.expectEqual(-32767, m.get(i16, "si").?);
+		try t.expectEqual(2147483647, m.get(i32, "nn").?);
+		try t.expectEqual(9223372036854775807, m.get(i64, "bi").?);
+		try t.expectEqual(170141183460469231731687303715884105727, m.get(i128, "hugn").?);
 
-		try t.expectEqual(@as(u8, 255), m.get(u8, "uti").?);
-		try t.expectEqual(@as(u16, 65535), m.get(u16, "usi").?);
-		try t.expectEqual(@as(u32, 4294967295), m.get(u32, "unn").?);
-		try t.expectEqual(@as(u64, 18446744073709551615), m.get(u64, "ubi").?);
+		try t.expectEqual(255, m.get(u8, "uti").?);
+		try t.expectEqual(65535, m.get(u16, "usi").?);
+		try t.expectEqual(4294967295, m.get(u32, "unn").?);
+		try t.expectEqual(18446744073709551615, m.get(u64, "ubi").?);
 
-		try t.expectEqual(@as(?i8, null), m.get(i8, "nti"));
-		try t.expectEqual(@as(?i16, null), m.get(i16, "nsi"));
-		try t.expectEqual(@as(?i32, null), m.get(i32, "nnn"));
-		try t.expectEqual(@as(?i64, null), m.get(i64, "nbi"));
-		try t.expectEqual(@as(?i128, null), m.get(i128, "nhugn"));
+		try t.expectEqual(null, m.get(i8, "nti"));
+		try t.expectEqual(null, m.get(i16, "nsi"));
+		try t.expectEqual(null, m.get(i32, "nnn"));
+		try t.expectEqual(null, m.get(i64, "nbi"));
+		try t.expectEqual(null, m.get(i128, "nhugn"));
 
-		try t.expectEqual(@as(?u8, null), m.get(u8, "nuti"));
-		try t.expectEqual(@as(?u16, null), m.get(u16, "nusi"));
-		try t.expectEqual(@as(?u32, null), m.get(u32, "nunn"));
-		try t.expectEqual(@as(?u64, null), m.get(u64, "nubi"));
+		try t.expectEqual(null, m.get(u8, "nuti"));
+		try t.expectEqual(null, m.get(u16, "nusi"));
+		try t.expectEqual(null, m.get(u32, "nunn"));
+		try t.expectEqual(null, m.get(u64, "nubi"));
 
 		try t.expectEqualStrings("790162b2-8a73-4cd7-9be8-acc7475655d6", m.get([]u8, "col_uuid").?);
-		try t.expectEqual(@as(?[]const u8, null), m.get([]u8, "zz"));
+		try t.expectEqual(null, m.get([]u8, "zz"));
 
 		try t.expectEqualStrings("over 9000", m.get([]u8, "power").?);
-		try t.expectEqual(@as(?[]const u8, null), m.get([]u8, "null_power"));
+		try t.expectEqual(null, m.get([]u8, "null_power"));
 
 		try t.expectEqual(try typed.Date.parse("2023-06-19"), m.get(typed.Date, "dte").?);
-		try t.expectEqual(@as(?typed.Date, null), m.get(typed.Date, "ndate"));
+		try t.expectEqual(null, m.get(typed.Date, "ndate"));
 
 		try t.expectEqual(try typed.Time.parse("23:03:45"), m.get(typed.Time, "tme").?);
-		try t.expectEqual(@as(?typed.Time, null), m.get(typed.Time, "ntme"));
+		try t.expectEqual(null, m.get(typed.Time, "ntme"));
 
-		try t.expectEqual(@as(i64, 1687127082123000), m.get(typed.Timestamp, "tz").?.micros);
-		try t.expectEqual(@as(?typed.Timestamp, null), m.get(typed.Timestamp, "ntz"));
+		try t.expectEqual(1687127082123000, m.get(typed.Timestamp, "tz").?.micros);
+		try t.expectEqual(null, m.get(typed.Timestamp, "ntz"));
 	}
 }

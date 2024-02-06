@@ -148,7 +148,7 @@ test "Pool" {
 	defer pool.release(c1);
 
 	const count = try c1.exec("delete from pool_test", .{});
-	try t.expectEqual(@as(usize, 6000), count);
+	try t.expectEqual(6000, count);
 }
 
 fn testPool(p: *Pool) void {

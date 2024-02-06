@@ -201,12 +201,12 @@ test "bind: basic types" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(@as(i64, 99), row.get(i64, 0).?);
-	try t.expectEqual(@as(f64, -32.01), row.get(f64, 1).?);
+	try t.expectEqual(99, row.get(i64, 0).?);
+	try t.expectEqual(-32.01, row.get(f64, 1).?);
 	try t.expectEqual(true, row.get(bool, 2).?);
 	try t.expectEqual(false, row.get(bool, 3).?);
-	try t.expectEqual(@as(?i32, null), row.get(i32, 4));
-	try t.expectEqual(@as(i32, 44), row.get(i32, 5).?);
+	try t.expectEqual(null, row.get(i32, 4));
+	try t.expectEqual(44, row.get(i32, 5).?);
 }
 
 test "bind: int" {
@@ -228,12 +228,12 @@ test "bind: int" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i64, 99), row.get(i64, 0).?);
-		try t.expectEqual(@as(i8, 2), row.get(i8, 1).?);
-		try t.expectEqual(@as(i16, 3), row.get(i16,2).?);
-		try t.expectEqual(@as(i32, 4), row.get(i32, 3).?);
-		try t.expectEqual(@as(i64, 5), row.get(i64, 4).?);
-		try t.expectEqual(@as(i128, -9955340232221457974987), row.get(i128, 5).?);
+		try t.expectEqual(99, row.get(i64, 0).?);
+		try t.expectEqual(2, row.get(i8, 1).?);
+		try t.expectEqual(3, row.get(i16,2).?);
+		try t.expectEqual(4, row.get(i32, 3).?);
+		try t.expectEqual(5, row.get(i64, 4).?);
+		try t.expectEqual(-9955340232221457974987, row.get(i128, 5).?);
 	}
 
 	{
@@ -247,11 +247,11 @@ test "bind: int" {
 		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i8, 127), row.get(i8, 0).?);
-		try t.expectEqual(@as(i16, 32767), row.get(i16,1).?);
-		try t.expectEqual(@as(i32, 2147483647), row.get(i32, 2).?);
-		try t.expectEqual(@as(i64, 9223372036854775807), row.get(i64, 3).?);
-		try t.expectEqual(@as(i128, 170141183460469231731687303715884105727), row.get(i128, 4).?);
+		try t.expectEqual(127, row.get(i8, 0).?);
+		try t.expectEqual(32767, row.get(i16,1).?);
+		try t.expectEqual(2147483647, row.get(i32, 2).?);
+		try t.expectEqual(9223372036854775807, row.get(i64, 3).?);
+		try t.expectEqual(170141183460469231731687303715884105727, row.get(i128, 4).?);
 	}
 
 	{
@@ -265,11 +265,11 @@ test "bind: int" {
 		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(i8, -127), row.get(i8, 0).?);
-		try t.expectEqual(@as(i16, -32767), row.get(i16,1).?);
-		try t.expectEqual(@as(i32, -2147483647), row.get(i32, 2).?);
-		try t.expectEqual(@as(i64, -9223372036854775807), row.get(i64, 3).?);
-		try t.expectEqual(@as(i128, -170141183460469231731687303715884105727), row.get(i128, 4).?);
+		try t.expectEqual(-127, row.get(i8, 0).?);
+		try t.expectEqual(-32767, row.get(i16,1).?);
+		try t.expectEqual(-2147483647, row.get(i32, 2).?);
+		try t.expectEqual(-9223372036854775807, row.get(i64, 3).?);
+		try t.expectEqual(-170141183460469231731687303715884105727, row.get(i128, 4).?);
 	}
 
 	{
@@ -282,10 +282,10 @@ test "bind: int" {
 		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(@as(u8, 255), row.get(u8, 0).?);
-		try t.expectEqual(@as(u16, 65535), row.get(u16, 1).?);
-		try t.expectEqual(@as(u32, 4294967295), row.get(u32, 2).?);
-		try t.expectEqual(@as(u64, 18446744073709551615), row.get(u64, 3).?);
+		try t.expectEqual(255, row.get(u8, 0).?);
+		try t.expectEqual(65535, row.get(u16, 1).?);
+		try t.expectEqual(4294967295, row.get(u32, 2).?);
+		try t.expectEqual(18446744073709551615, row.get(u64, 3).?);
 	}
 }
 
@@ -305,9 +305,9 @@ test "bind: floats" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(@as(f64, 99.88), row.get(f64, 0).?);
-	try t.expectEqual(@as(f32, -3.192), row.get(f32, 1).?);
-	try t.expectEqual(@as(f64, 999.182), row.get(f64, 2).?);
+	try t.expectEqual(99.88, row.get(f64, 0).?);
+	try t.expectEqual(-3.192, row.get(f32, 1).?);
+	try t.expectEqual(999.182, row.get(f64, 2).?);
 }
 
 test "bind: decimal" {
@@ -325,8 +325,8 @@ test "bind: decimal" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(@as(f64, 1.23), row.get(f64, 0).?);
-	try t.expectEqual(@as(f64, -0.329148), row.get(f64, 1).?);
+	try t.expectEqual(1.23, row.get(f64, 0).?);
+	try t.expectEqual(-0.329148, row.get(f64, 1).?);
 }
 
 test "bind: uuid" {
@@ -412,7 +412,7 @@ test "bind: date/time" {
 	const row = (try rows.next()).?;
 	try t.expectEqual(date, row.get(Date, 0).?);
 	try t.expectEqual(time, row.get(Time, 1).?);
-	try t.expectEqual(@as(i64, 751203002000000), row.get(i64, 2).?);
+	try t.expectEqual(751203002000000, row.get(i64, 2).?);
 	try t.expectEqual(interval, row.get(Interval, 3).?);
 	try t.expectEqual(Interval{.months = 0, .days = 9298392, .micros = 0}, row.get(Interval, 4).?);
 }
@@ -432,7 +432,7 @@ test "bind: enum" {
 	const row = (try rows.next()).?;
 	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
 	try t.expectEqualStrings("keemun", (try row.getEnum(1)).?);
-	try t.expectEqual(@as(?[]const u8, null), try row.getEnum(2));
+	try t.expectEqual(null, try row.getEnum(2));
 }
 
 test "bind: bistring" {
@@ -480,9 +480,9 @@ test "bind: dynamic" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(@as(?i32, null), row.get(i32, 0));
+	try t.expectEqual(null, row.get(i32, 0));
 	try t.expectEqualStrings("over", row.get([]u8, 1).?);
-	try t.expectEqual(@as(i16, 9000), row.get(i16, 2).?);
+	try t.expectEqual(9000, row.get(i16, 2).?);
 }
 
 test "query parameters" {
@@ -502,55 +502,55 @@ test "query parameters" {
 	, .{.auto_release = false});
 	defer stmt.deinit();
 
-	try t.expectEqual(@as(usize, 19), stmt.numberOfParameters());
+	try t.expectEqual(19, stmt.numberOfParameters());
 
 	// bool
-	try t.expectEqual(@as(usize, 1), stmt.parameterTypeC(0));
+	try t.expectEqual(1, stmt.parameterTypeC(0));
 	try t.expectEqual(ParameterType.bool, stmt.parameterType(0));
 
 	// int
-	try t.expectEqual(@as(usize, 2), stmt.parameterTypeC(1));
+	try t.expectEqual(2, stmt.parameterTypeC(1));
 	try t.expectEqual(ParameterType.i8, stmt.parameterType(1));
-	try t.expectEqual(@as(usize, 3), stmt.parameterTypeC(2));
+	try t.expectEqual(3, stmt.parameterTypeC(2));
 	try t.expectEqual(ParameterType.i16, stmt.parameterType(2));
-	try t.expectEqual(@as(usize, 4), stmt.parameterTypeC(3));
+	try t.expectEqual(4, stmt.parameterTypeC(3));
 	try t.expectEqual(ParameterType.i32, stmt.parameterType(3));
-	try t.expectEqual(@as(usize, 5), stmt.parameterTypeC(4));
+	try t.expectEqual(5, stmt.parameterTypeC(4));
 	try t.expectEqual(ParameterType.i64, stmt.parameterType(4));
-	try t.expectEqual(@as(usize, 16), stmt.parameterTypeC(5));
+	try t.expectEqual(16, stmt.parameterTypeC(5));
 	try t.expectEqual(ParameterType.i128, stmt.parameterType(5));
 
 	// uint
-	try t.expectEqual(@as(usize, 6), stmt.parameterTypeC(6));
+	try t.expectEqual(6, stmt.parameterTypeC(6));
 	try t.expectEqual(ParameterType.u8, stmt.parameterType(6));
-	try t.expectEqual(@as(usize, 7), stmt.parameterTypeC(7));
+	try t.expectEqual(7, stmt.parameterTypeC(7));
 	try t.expectEqual(ParameterType.u16, stmt.parameterType(7));
-	try t.expectEqual(@as(usize, 8), stmt.parameterTypeC(8));
+	try t.expectEqual(8, stmt.parameterTypeC(8));
 	try t.expectEqual(ParameterType.u32, stmt.parameterType(8));
-	try t.expectEqual(@as(usize, 9), stmt.parameterTypeC(9));
+	try t.expectEqual(9, stmt.parameterTypeC(9));
 	try t.expectEqual(ParameterType.u64, stmt.parameterType(9));
 
 	// float & decimal
-	try t.expectEqual(@as(usize, 10), stmt.parameterTypeC(10));
+	try t.expectEqual(10, stmt.parameterTypeC(10));
 	try t.expectEqual(ParameterType.f32, stmt.parameterType(10));
-	try t.expectEqual(@as(usize, 11), stmt.parameterTypeC(11));
+	try t.expectEqual(11, stmt.parameterTypeC(11));
 	try t.expectEqual(ParameterType.f64, stmt.parameterType(11));
-	try t.expectEqual(@as(usize, 19), stmt.parameterTypeC(12));
+	try t.expectEqual(19, stmt.parameterTypeC(12));
 	try t.expectEqual(ParameterType.decimal, stmt.parameterType(12));
 
 	// time
-	try t.expectEqual(@as(usize, 12), stmt.parameterTypeC(13));
+	try t.expectEqual(12, stmt.parameterTypeC(13));
 	try t.expectEqual(ParameterType.timestamp, stmt.parameterType(13));
-	try t.expectEqual(@as(usize, 13), stmt.parameterTypeC(14));
+	try t.expectEqual(13, stmt.parameterTypeC(14));
 	try t.expectEqual(ParameterType.date, stmt.parameterType(14));
-	try t.expectEqual(@as(usize, 14), stmt.parameterTypeC(15));
+	try t.expectEqual(14, stmt.parameterTypeC(15));
 	try t.expectEqual(ParameterType.time, stmt.parameterType(15));
-	try t.expectEqual(@as(usize, 15), stmt.parameterTypeC(16));
+	try t.expectEqual(15, stmt.parameterTypeC(16));
 	try t.expectEqual(ParameterType.interval, stmt.parameterType(16));
 
 	// varchar & blob
-	try t.expectEqual(@as(usize, 17), stmt.parameterTypeC(17));
+	try t.expectEqual(17, stmt.parameterTypeC(17));
 	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
-	try t.expectEqual(@as(usize, 18), stmt.parameterTypeC(18));
+	try t.expectEqual(18, stmt.parameterTypeC(18));
 	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
 }
