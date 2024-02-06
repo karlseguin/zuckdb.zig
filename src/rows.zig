@@ -113,16 +113,12 @@ pub const Rows = struct {
 		{
 			const result = self.result;
 			c.duckdb_destroy_result(result);
-			const ptr: [*]align(lib.RESULT_ALIGNOF) u8 = @ptrCast(result);
-			const slice = ptr[0..lib.RESULT_SIZEOF];
-			allocator.free(slice);
+			allocator.destroy(result);
 		}
 
 		if (self.stmt) |stmt| {
 			c.duckdb_destroy_prepare(stmt);
-			const ptr: [*]align(lib.STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
-			const slice = ptr[0..lib.STATEMENT_SIZEOF];
-			allocator.free(slice);
+			allocator.destroy(stmt);
 		}
 
 		if (self.chunk_count == 0) {

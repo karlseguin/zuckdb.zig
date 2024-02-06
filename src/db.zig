@@ -34,9 +34,8 @@ pub const DB = struct{
 		const str = try lib.stringZ(path, allocator);
 		defer str.deinit(allocator);
 
-		const config_slice = try allocator.alignedAlloc(u8, CONFIG_ALIGNOF, CONFIG_SIZEOF);
-		defer allocator.free(config_slice);
-		const config: *c.duckdb_config = @ptrCast(config_slice.ptr);
+		const config = try allocator.create(c.duckdb_config);
+		defer allocator.destroy(config);
 
 		if (c.duckdb_create_config(config) == DuckDBError) {
 			return error.ConfigCreate;
@@ -54,9 +53,8 @@ pub const DB = struct{
 			}
 		}
 
-		const db_slice = try allocator.alignedAlloc(u8, DB_ALIGNOF, DB_SIZEOF);
-		errdefer allocator.free(db_slice);
-		const db: *c.duckdb_database = @ptrCast(db_slice.ptr);
+		const db = try allocator.create(c.duckdb_database);
+		errdefer allocator.destroy(db);
 
 		var out_err: [*c]u8 = undefined;
 		if (c.duckdb_open_ext(str.z, db, config.*, &out_err) == DuckDBError) {
@@ -74,10 +72,7 @@ pub const DB = struct{
 	pub fn deinit(self: *const DB) void {
 		const db = self.db;
 		c.duckdb_close(db);
-
-		const ptr: [*]align(DB_ALIGNOF) u8 = @ptrCast(db);
-		const slice = ptr[0..DB_SIZEOF];
-		self.allocator.free(slice);
+		self.allocator.destroy(db);
 	}
 
 	pub fn conn(self: DB) !Conn {

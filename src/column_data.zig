@@ -1,8 +1,8 @@
-const c = @cImport(@cInclude("zuckdb.h"));
+const lib = @import("lib.zig");
 
-const zuckdb = @import("zuckdb.zig");
-const Rows = @import("rows.zig").Rows;
-const ParameterType = zuckdb.ParameterType;
+const c = lib.c;
+const Rows = lib.Rows;
+const ParameterType = lib.ParameterType;
 
 // DuckDB exposes data as "vectors", which is essentially a pointer to memory
 // that holds data based on the column type (a vector is data for a column, not

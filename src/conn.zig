@@ -19,10 +19,8 @@ pub const Conn = struct {
 	pub fn open(db: DB) !Conn {
 		const allocator = db.allocator;
 
-		const slice = try allocator.alignedAlloc(u8, lib.CONN_ALIGNOF, lib.CONN_SIZEOF);
-		errdefer allocator.free(slice);
-
-		const conn: *c.duckdb_connection = @ptrCast(slice.ptr);
+		const conn = try allocator.create(c.duckdb_connection);
+		errdefer allocator.destroy(conn);
 
 		if (c.duckdb_connect(db.db.*, conn) == DuckDBError) {
 			return error.ConnectFail;
@@ -44,8 +42,7 @@ pub const Conn = struct {
 
 		const conn = self.conn;
 		c.duckdb_disconnect(conn);
-		const ptr: [*]align(lib.CONN_ALIGNOF) u8 = @ptrCast(conn);
-		allocator.free(ptr[0..lib.CONN_SIZEOF]);
+		allocator.destroy(conn);
 	}
 
 	pub fn begin(self: *Conn) !void {
@@ -82,9 +79,8 @@ pub const Conn = struct {
 		const str = try lib.stringZ(sql, allocator);
 		defer str.deinit(allocator);
 
-		const slice = try allocator.alignedAlloc(u8, lib.RESULT_ALIGNOF, lib.RESULT_SIZEOF);
-		errdefer allocator.free(slice);
-		const result: *c.duckdb_result = @ptrCast(slice.ptr);
+		const result = try allocator.create(c.duckdb_result);
+		errdefer allocator.destroy(result);
 
 		if (c.duckdb_query(self.conn.*, str.z, result) == DuckDBError) {
 			try self.duckdbError(c.duckdb_result_error(result));
@@ -117,11 +113,8 @@ pub const Conn = struct {
 		const str = try lib.stringZ(sql, allocator);
 		defer str.deinit(allocator);
 
-		const slice = try allocator.alignedAlloc(u8, lib.STATEMENT_ALIGNOF, lib.STATEMENT_SIZEOF);
-		errdefer allocator.free(slice);
-
-		const stmt: *c.duckdb_prepared_statement = @ptrCast(slice.ptr);
-
+		const stmt = try allocator.create(c.duckdb_prepared_statement);
+		errdefer allocator.destroy(stmt);
 		if (c.duckdb_prepare(self.conn.*, str.z, stmt) == DuckDBError) {
 			try self.duckdbError(c.duckdb_prepare_error(stmt.*));
 			return error.DuckDBError;

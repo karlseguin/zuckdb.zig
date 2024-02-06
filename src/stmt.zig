@@ -34,9 +34,7 @@ pub const Stmt = struct {
 	pub fn deinit(self: Stmt) void {
 		const stmt = self.stmt;
 		c.duckdb_destroy_prepare(stmt);
-		const ptr: [*]align(lib.STATEMENT_ALIGNOF) u8 = @ptrCast(stmt);
-		const slice = ptr[0..lib.STATEMENT_SIZEOF];
-		self.conn.allocator.free(slice);
+		self.conn.allocator.destroy(stmt);
 	}
 
 	pub fn bind(self: Stmt, values: anytype) !void {
@@ -54,9 +52,8 @@ pub const Stmt = struct {
 		const conn = self.conn;
 		const allocator = conn.allocator;
 
-		const slice = try allocator.alignedAlloc(u8, lib.RESULT_ALIGNOF, lib.RESULT_SIZEOF);
-		errdefer allocator.free(slice);
-		const result: *c.duckdb_result = @ptrCast(slice.ptr);
+		const result = try allocator.create(c.duckdb_result);
+		errdefer allocator.destroy(result);
 
 		if (c.duckdb_execute_prepared(self.stmt.*, result) == DuckDBError) {
 			try self.conn.duckdbError(c.duckdb_result_error(result));
