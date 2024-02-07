@@ -6,6 +6,8 @@ pub fn build(b: *std.Build) !void {
 	const target = b.standardTargetOptions(.{});
 	const optimize = b.standardOptimizeOption(.{});
 
+	const lib_path = LazyPath.relative("lib");
+
 	_ = b.addModule("zuckdb", .{
 		.root_source_file = .{ .path = "src/zuckdb.zig" },
 	});
@@ -18,10 +20,9 @@ pub fn build(b: *std.Build) !void {
 			.optimize = optimize,
 		});
 
-		const lib_path = LazyPath.relative("lib");
 		lib_test.addRPath(lib_path);
-		lib_test.addLibraryPath(lib_path);
 		lib_test.addIncludePath(lib_path);
+		lib_test.addLibraryPath(lib_path);
 		lib_test.linkSystemLibrary("duckdb");
 
 		const run_test = b.addRunArtifact(lib_test);

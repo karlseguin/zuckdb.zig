@@ -92,7 +92,7 @@ Same as `init`, but takes a 4th output parameter. On open failure, the output pa
 
 ```zig
 var open_err: ?[]u8 = null;
-const db = DB.initWithErr(allocator, "/does/not/exist", .{}, &err) catch |err| {
+const db = DB.initWithErr(allocator, "/does/not/exist", .{}, &open_err) catch |err| {
     if (err == error.OpenDB) {
         defer allocator.free(open_err.?);
         std.debug.print("DB open: {}", .{open_err.?});
@@ -225,9 +225,13 @@ try t.expectEqual(null, list.get(3));
 try t.expectEqual(-4, list.get(4).?);
 ```
 
-`list` always returns a nullable, i.e. `?zuckdb.List(T)`. Besides the `len` field, `get` is used on the provided list to return a value at a specific index. `row.list(T)` works with any of the types supported by `row.get`.
+`list()` always returns a nullable, i.e. `?zuckdb.List(T)`. Besides the `len` field, `get` is used on the provided list to return a value at a specific index. `row.list(T, col).get(idz)` works with any of the types supported by `row.get(col)`.
 
-### zuckdb.Enum
+a `List(T)` also has a `alloc(allocator: Allocator) ![]T` method. This will allocate a `[]T` and fill it with the list values. It is the caller's responsibility to free the returned slice.
+
+Alternatively, `fill(into: []T) void` can be used used to populate `into` with items from the list. This will fill `@min(into.len, list.len)` values.
+
+# zuckdb.Enum
 The `zuckdb.Enum` is a special type which exposes two functions: `raw() [*c]const u8` and `rowCache() ![]const u8`.
 
 `raw()` returns a C string directly to the DuckDB enum string value. If you want to turn this into a `[]const u8`, you'll need to wrap it in `std.mem.span`. The value returned `raw` is only valid untli the next iteration.

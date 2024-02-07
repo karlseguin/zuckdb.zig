@@ -25,11 +25,11 @@ pub const Row = struct {
 
 		const TT = switch (@typeInfo(T)) {
 			.Optional => |opt| blk: {
-				if (isNull(column.validity, index)) return null;
+				if (_isNull(column.validity, index)) return null;
 				break :blk opt.child;
 			},
 			else => blk: {
-				lib.assert(isNull(column.validity, index) == false);
+				lib.assert(_isNull(column.validity, index) == false);
 				break :blk T;
 			},
 		};
@@ -43,66 +43,15 @@ pub const Row = struct {
 	pub fn list(self: Row, comptime T: type, col: usize) ?List(T) {
 		const index = self.index;
 		const column = self.columns[col];
-		if (isNull(column.validity, index)) return null;
+		if (_isNull(column.validity, index)) return null;
 
 		const vc = column.data.container.list;
 		const entry = vc.entries[index];
-		return List(T).init(col, vc.child, vc.validity, entry.offset, entry.length);
+		return List(T).init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
 	}
 
-	pub fn toMap(self: Row, builder: *MapBuilder) !typed.Map {
-		const index = self.index;
-		const types = builder.types;
-
-		var aa = builder.arena.allocator();
-		var map = typed.Map.init(aa);
-		try map.ensureTotalCapacity(@intCast(types.len));
-		errdefer map.deinit();
-
-		for (types, builder.names, 0..) |tpe, name, col| {
-			const column = self.columns[col];
-
-			if (isNull(column.validity, index)) {
-				try map.putAssumeCapacity(name, null);
-				continue;
-			}
-
-			switch (tpe) {
-				.varchar, .blob => try map.putAssumeCapacity(name, try aa.dupe(u8, self.get([]const u8, col))),
-				.bool => try map.putAssumeCapacity(name, self.get(bool, col)),
-				.i8 => try map.putAssumeCapacity(name, self.get(i8, col)),
-				.i16 => try map.putAssumeCapacity(name, self.get(i16, col)),
-				.i32 => try map.putAssumeCapacity(name, self.get(i32, col)),
-				.i64 => try map.putAssumeCapacity(name, self.get(i64, col)),
-				.u8 => try map.putAssumeCapacity(name, self.get(u8, col)),
-				.u16 => try map.putAssumeCapacity(name, self.get(u16, col)),
-				.u32 => try map.putAssumeCapacity(name, self.get(u32, col)),
-				.u64 => try map.putAssumeCapacity(name, self.get(u64, col)),
-				.f32 => try map.putAssumeCapacity(name, self.get(f32, col)),
-				.f64, .decimal => try map.putAssumeCapacity(name, self.get(f64, col)),
-				.i128 => try map.putAssumeCapacity(name, self.get(i128, col)),
-				.uuid => try map.putAssumeCapacity(name, try aa.dupe(u8, &self.get(UUID, col))),
-				.date => {
-					const date = self.get(Date, col);
-					try map.putAssumeCapacity(name, typed.Date{
-						.year = @intCast(date.year),
-						.month = @intCast(date.month),
-						.day = @intCast(date.day),
-					});
-				},
-				.time => {
-					const time = self.get(Time, col);
-					try map.putAssumeCapacity(name, typed.Time{
-						.hour = @intCast(time.hour),
-						.min =  @intCast(time.min),
-						.sec =  @intCast(time.sec),
-					});
-				},
-				.timestamp => try map.putAssumeCapacity(name, typed.Timestamp{.micros =  self.get(i64, col)}),
-				else => return error.UnsupportedMapType,
-			}
-		}
-		return map;
+	pub fn isNull(self: Row, col: usize) bool {
+		return _isNull( self.columns[col].validity, self.index);
 	}
 };
 
@@ -122,24 +71,6 @@ pub const OwningRow = struct {
 
 	pub fn deinit(self: OwningRow) void {
 		self.rows.deinit();
-	}
-
-	pub fn mapBuilder(self: OwningRow, allocator: Allocator) !MapBuilder {
-		return try self.rows.mapBuilder(allocator);
-	}
-
-	pub fn toMap(self: OwningRow, builder: *MapBuilder) !typed.Map {
-		return self.row.toMap(builder);
-	}
-};
-
-pub const MapBuilder = struct {
-	arena: std.heap.ArenaAllocator,
-	types: []ParameterType,
-	names: [][]const u8,
-
-	pub fn deinit(self: MapBuilder) void {
-		self.arena.deinit();
 	}
 };
 
@@ -173,15 +104,17 @@ pub fn List(comptime T: type) type {
 	return struct {
 		len: usize,
 		col: usize,
+		type: ParameterType,
 		_validity: [*c]u64,
 		_offset: usize,
 		_scalar: ColumnData.Scalar,
 
 		const Self = @This();
 
-		fn init(col: usize, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
+		fn init(col: usize, child_type: ParameterType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
 			return .{
 				.col = col,
+				.type = child_type,
 				.len = length,
 				._offset = offset,
 				._scalar = scalar,
@@ -189,26 +122,39 @@ pub fn List(comptime T: type) type {
 			};
 		}
 
-		pub fn get(self: Self, i: usize) T {
+		pub fn get(self: *const Self, i: usize) T {
 			const index = i + self._offset;
 
 			const TT = switch (@typeInfo(T)) {
 				.Optional => |opt| blk: {
-					if (isNull(self._validity, index)) return null;
+					if (_isNull(self._validity, index)) return null;
 					break :blk opt.child;
 				},
 				else => blk: {
-					lib.assert(isNull(self._validity, index) == false);
+					lib.assert(_isNull(self._validity, index) == false);
 					break :blk T;
 				},
 			};
 
 			return getScalar(TT, self._scalar, index, self.col);
 		}
+
+		pub fn alloc(self: *const Self, allocator: Allocator) ![]T {
+			const arr = try allocator.alloc(T, self.len);
+			self.fill(arr);
+			return arr;
+		}
+
+		pub fn fill(self: *const Self, into: []T) void {
+			const limit = @min(into.len, self.len);
+			for (0..limit) |i| {
+				into[i] = self.get(i);
+			}
+		}
 	};
 }
 
-fn isNull(validity: [*c]u64, index: usize) bool {
+inline fn _isNull(validity: [*c]u64, index: usize) bool {
 	const entry_index = index / 64;
 	const entry_mask = index % 64;
 	return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
@@ -402,6 +348,7 @@ test "read varchar" {
 			try t.expectEqualStrings("1", row.get(?[]u8, 0).?);
 			try t.expectEqualStrings("1", row.get([]const u8, 0));
 			try t.expectEqualStrings("1", row.get(?[]const u8, 0).?);
+			try t.expectEqual(false, row.isNull(0));
 		}
 
 		try t.expectEqualStrings("12345", (try rows.next()).?.get([]const u8, 0));
@@ -423,6 +370,7 @@ test "read varchar" {
 			const row = (try rows.next()).?;
 			try t.expectEqual(null, row.get(?[]u8, 0));
 			try t.expectEqual(null, row.get(?[]const u8, 0));
+			try t.expectEqual(true, row.isNull(0));
 		}
 
 		try t.expectEqual(null, try rows.next());
@@ -620,6 +568,10 @@ test "read list" {
 		try t.expectEqual(99, list.get(2).?);
 		try t.expectEqual(null, list.get(3));
 		try t.expectEqual(-4, list.get(4).?);
+
+		const arr = try list.alloc(t.allocator);
+		defer t.allocator.free(arr);
+		try t.expectEqualSlices(?i32, &.{1, 32, 99, null, -4}, arr);
 	}
 
 	{
@@ -629,6 +581,7 @@ test "read list" {
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.list(?[]u8, 0).?;
 		try t.expectEqual(3, list.len);
+		try t.expectEqual(.varchar, list.type);
 		try t.expectEqualStrings("tag1", list.get(0).?);
 		try t.expectEqual(null, list.get(1));
 		try t.expectEqualStrings("tag2", list.get(2).?);

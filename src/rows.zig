@@ -283,11 +283,12 @@ fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type
 			const child_type = c.duckdb_get_type_id(c.duckdb_vector_get_column_type(child_vector));
 			const child_data = generateScalarColumnData(rows, child_vector, child_type) orelse return null;
 			const child_validity = c.duckdb_vector_get_validity(child_vector);
-			return .{ .list = .{
+			return .{.list = .{
 				.child = child_data,
 				.validity = child_validity,
 				.entries = @ptrCast(@alignCast(raw_data)),
-			} };
+				.type = ParameterType.fromDuckDBType(child_type),
+			}};
 		},
 		else => return null,
 	}
