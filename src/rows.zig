@@ -3,7 +3,6 @@ const lib = @import("lib.zig");
 
 const c = lib.c;
 const Row = lib.Row;
-const MapBuilder = lib.MapBuilder;
 const ParameterType = lib.ParameterType;
 const ColumnData = lib.ColumnData;
 
@@ -142,28 +141,6 @@ pub const Rows = struct {
 
 	pub fn columnType(self: Rows, i: usize) ParameterType {
 		return ParameterType.fromDuckDBType(self.column_types[i]);
-	}
-
-	pub fn mapBuilder(self: Rows, allocator: Allocator) !MapBuilder {
-		const column_count = self.column_count;
-
-		var arena = std.heap.ArenaAllocator.init(allocator);
-		errdefer arena.deinit();
-
-		const aa = arena.allocator();
-		var types = try aa.alloc(ParameterType, column_count);
-		var names = try aa.alloc([]const u8, column_count);
-
-		for (self.column_types, 0..) |ctype, i| {
-			types[i] = ParameterType.fromDuckDBType(ctype);
-			names[i] = try aa.dupe(u8, std.mem.span(self.columnName(i)));
-		}
-
-		return .{
-			.types = types,
-			.names = names,
-			.arena = arena,
-		};
 	}
 
 	pub fn next(self: *Rows) !?Row {
