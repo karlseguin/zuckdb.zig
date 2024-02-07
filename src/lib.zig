@@ -9,13 +9,6 @@ pub const OwningRow = @import("row.zig").OwningRow;
 pub const MapBuilder = @import("row.zig").MapBuilder;
 pub const ColumnData = @import("column_data.zig").ColumnData;
 
-// pub const CONN_SIZEOF = c.connection_sizeof;
-// pub const CONN_ALIGNOF = c.connection_alignof;
-// pub const RESULT_SIZEOF = c.result_sizeof;
-// pub const RESULT_ALIGNOF = c.result_alignof;
-// pub const STATEMENT_SIZEOF = c.statement_sizeof;
-// pub const STATEMENT_ALIGNOF = c.statement_alignof;
-
 pub const Date = c.duckdb_date_struct;
 pub const Time = c.duckdb_time_struct;
 pub const Interval = c.duckdb_interval;

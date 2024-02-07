@@ -10,7 +10,6 @@ const ColumnData = lib.ColumnData;
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
-
 pub const Rows = struct {
 	allocator: Allocator,
 

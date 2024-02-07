@@ -8,21 +8,18 @@ defer db.deinit();
 var conn = try db.conn();
 defer conn.deinit();
 
-{
-    // for insert/update/delete returns the # changed rows
-    // returns 0 for other statements
-    _ = try conn.exec("create table users(id int)", .{});
-}
+// for insert/update/delete returns the # changed rows
+// returns 0 for other statements
+_ = try conn.exec("create table users(id int)", .{});
 
-{
-    const rows = try conn.query("select * from users", .{});
-    defer rows.deinit();
 
-    while (try rows.next()) |row| {
-        // get the 0th column of the current row
-        const id = row.get(i32, 0);
-        std.debug.print("The id is: {d}", .{id});
-    }
+const rows = try conn.query("select * from users", .{});
+defer rows.deinit();
+
+while (try rows.next()) |row| {
+    // get the 0th column of the current row
+    const id = row.get(i32, 0);
+    std.debug.print("The id is: {d}", .{id});
 }
 ```
 
@@ -49,6 +46,23 @@ exe.root_module.addImport("zqlite", zqlite.module("pg"));
 ```
 
 ## Errors
+
+### DB.init
+Rather than calling `DB.init`, you can call `DB.initWithErr` and pass an optional string pointer. If the function returns `error.OpenDB` then the error string will be set. You must free this string when done:
+
+```zig
+var err: ?[]u8 = null;
+const db = DB.initWithErr(allocator, "/tmp/does/not/exist/zuckdb", .{}, &err) catch |err| {
+    if (err == error.OpenDB) {
+        defer allocator.free(err.?);
+        std.debug.print("DB open: {}", .{err.?});
+    }
+    return err;
+};
+try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/does/not/exist/zuckdb\": No such file or directory", err.?);
+t.allocator.free(err.?);
+
+
 A call that returns an `error.DuckDBError` will have the `conn.err` field set to an error description:
 
 ```zig

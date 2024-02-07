@@ -13,8 +13,6 @@ const CONFIG_ALIGNOF = c.config_alignof;
 const DB_SIZEOF = c.database_sizeof;
 const DB_ALIGNOF = c.database_alignof;
 
-const log = std.log.scoped(.zuckdb);
-
 pub const DB = struct{
 	allocator: Allocator,
 	db: *c.duckdb_database,
@@ -31,6 +29,10 @@ pub const DB = struct{
 	};
 
 	pub fn init(allocator: Allocator, path: anytype, db_config: Config) !DB {
+		return initWithErr(allocator, path, db_config, null);
+	}
+
+	pub fn initWithErr(allocator: Allocator, path: anytype, db_config: Config, err: ?*?[]u8) !DB {
 		const str = try lib.stringZ(path, allocator);
 		defer str.deinit(allocator);
 
@@ -58,8 +60,10 @@ pub const DB = struct{
 
 		var out_err: [*c]u8 = undefined;
 		if (c.duckdb_open_ext(str.z, db, config.*, &out_err) == DuckDBError) {
-			log.err("zudkdb failed to open database: {s}", .{std.mem.span(out_err)});
-			c.duckdb_free(out_err);
+			defer c.duckdb_free(out_err);
+			if (err) |e| {
+				e.* = try allocator.dupe(u8, std.mem.span(out_err));
+			}
 			return error.OpenDB;
 		}
 
@@ -83,3 +87,11 @@ pub const DB = struct{
 		return Pool.init(self, config);
 	}
 };
+
+const t = std.testing;
+test "DB: error" {
+	var err: ?[]u8 = null;
+	try t.expectError(error.OpenDB, DB.initWithErr(t.allocator, "/tmp/does/not/exist/zuckdb", .{}, &err));
+	try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/does/not/exist/zuckdb\": No such file or directory", err.?);
+	t.allocator.free(err.?);
+}
