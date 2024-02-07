@@ -30,19 +30,46 @@ Any non-primitive value that you get from the `row` are valid only until the nex
 ```zig
 .dependencies = .{
     ...
-    .zqlite = .{
-        .url = "git+https://github.com/karlseguin/zqlite.zig#master",
-        .hash = {{ actual_hash string, remove this line before 'zig build' to get actual hash }},
+    .zuckdb = .{
+        .url = "git+https://github.com/karlseguin/zuckdb.zig#master",
+        .hash = "{{ actual_hash string, remove this line before 'zig build' to get actual hash }}",
     },
 },
 ```
-2) Add this in `build.zig`:
+
+2) Download the libduckdb from the <a href="https://duckdb.org/docs/archive/0.9.2/installation/?version=latest&environment=cplusplus&installer=binary">DuckDB download page</a>. 
+
+3) Place the `duckdb.h` file and the `libduckdb.so` (linux) or `libduckdb.dylib` (mac) in your project's `lib` folder.
+
+4) Add this in `build.zig`:
+
 ```zig
-const zqlite = b.dependency("zqlite", .{
+const zuckdb = b.dependency("zuckdb", .{
+    .target = target,
+    .optimize = optimize,
+}).module("zuckdb");
+
+// tell zuckdb.zig where to find the duckdb.h file
+zuckdb.addIncludePath(LazyPath.relative("lib/"));
+
+
+
+// Your app's program
+const exe = b.addExecutable(.{
+    .name = "run",
+    .root_source_file = .{ .path = "test.zig" },
     .target = target,
     .optimize = optimize,
 });
-exe.root_module.addImport("zqlite", zqlite.module("pg"));
+exe.root_module.addImport("zuckdb", zuckdb);
+
+// link to libduckdb
+exe.linkSystemLibrary("duckdb"); 
+
+// tell the linker where to find libduckdb.so (linux) or libduckdb.dylib (macos)
+exe.addLibraryPath(LazyPath.relative("lib/"));
+
+// add other imports
 ```
 
 ## DB
@@ -95,7 +122,7 @@ Initializes a pool of connections to the DB.
 var pool = db.pool(.{.size = 2});
 defer pool.deinit();
 
-var conn = pool.acquire();
+var conn = try pool.acquire();
 defer pool.release(conn);
 ```
 
@@ -204,7 +231,7 @@ var pool = db.pool(.{
 });
 defer pool.deinit();
 
-var conn = pool.acquire();
+var conn = try pool.acquire();
 defer pool.release(conn);
 ```
 
