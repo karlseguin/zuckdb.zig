@@ -61,7 +61,6 @@ pub const ColumnData = struct {
 	pub const List = struct {
 		child: Scalar,
 		validity: [*c]u64,
-		type: ParameterType,
 		entries: [*]c.duckdb_list_entry,
 	};
 

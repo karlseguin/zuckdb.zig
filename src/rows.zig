@@ -309,7 +309,6 @@ fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type
 			return .{ .list = .{
 				.child = child_data,
 				.validity = child_validity,
-				.type = ParameterType.fromDuckDBType(child_type),
 				.entries = @ptrCast(@alignCast(raw_data)),
 			} };
 		},

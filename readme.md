@@ -52,8 +52,6 @@ const zuckdb = b.dependency("zuckdb", .{
 // tell zuckdb.zig where to find the duckdb.h file
 zuckdb.addIncludePath(LazyPath.relative("lib/"));
 
-
-
 // Your app's program
 const exe = b.addExecutable(.{
     .name = "run",
@@ -72,7 +70,7 @@ exe.addLibraryPath(LazyPath.relative("lib/"));
 // add other imports
 ```
 
-## DB
+# DB
 The `DB` is used to intialize the database, open connections and, optionally, create a connection pool.
 
 ## init
@@ -103,10 +101,10 @@ const db = DB.initWithErr(allocator, "/does/not/exist", .{}, &err) catch |err| {
 };
 ```
 
-### deinit
+## deinit
 Closes the database.
 
-### conn
+## conn
 Returns a new connection object. 
 
 ```zig
@@ -115,7 +113,7 @@ defer conn.deinit();
 ...
 ```
 
-### pool
+## pool
 Initializes a pool of connections to the DB.
 
 ```zig
@@ -126,9 +124,9 @@ var conn = try pool.acquire();
 defer pool.release(conn);
 ```
 
-## Conn
+# Conn
 
-### Query
+## query
 Use `conn.query(sql, args)` to query the database and return a `zuckdb.Rows` which can be iterated. You must call `deinit` on the returned rows.
 
 ```zig
@@ -139,10 +137,10 @@ while (try rows.next()) |row| {
 }
 ```
 
-### Exec
+## exec
 `conn.exec(sql, args)` is a wrapper around `query` which returns the number of affected rows for insert, updates or deletes.
 
-### Row
+## row
 `conn.row(sql, args)` is a wrapper around `query` which returns a single optional row. You must call `deinit` on the returned row:
 
 ```zig
@@ -151,10 +149,10 @@ defer row.deinit();
 // ...
 ```
 
-### begin/commit/rollback
+## begin/commit/rollback
 The `conn.begin()`, `conn.commit()` and `conn.rollback()` calls are wrappers around `exec`, e.g.: `conn.exec("begin", .{})`.
 
-### DuckDBError
+## err
 If a method of `conn` returns `error.DuckDBError`, `conn.err` will be set:
 
 ```zig
@@ -170,7 +168,7 @@ const rows = conn.query("....", .{}) catch |err| {
 
 In the above snippet, it's possible to skip the `if (err == error.DuckDBError)`check, but in that case conn.err could be set from some previous command (conn.err is always reset when acquired from the pool).
 
-## Rows
+# Rows
 The `rows` returned from `conn.query` exposes the following methods:
 
 * `count()` - the number of rows in the result
@@ -181,9 +179,9 @@ The `rows` returned from `conn.query` exposes the following methods:
 
 The most important method on `rows` is `next()` which is used to iterate the results. `next()` is a typical Zig iterator and returns a `?Row` which will be null when no more rows exist to be iterated.
 
-## Row
+# Row
 
-### get
+## get
 `Row` exposes a `get(T, index) T` function. This function trusts you! If you ask for an <code>i32</code> the library will crash if the column is not an <code>int4</code>. Similarl, if the value can be null, you must use the optional type, e.g. <code>?i32</code>.
 
 The supported types for `get`, are:
@@ -211,7 +209,25 @@ Optional version of the above are all supported **and must be used** if it's pos
 
 String values and enums are only valid until the next call to `next()` or `deinit`. You must dupe the values if you want them to outlive the row.s
 
-### Enum
+## list
+`Row` exposes a `list` method which behaves similar to `get` but returns a `zuckdb.List(T)`.
+
+```zig
+const row = (try conn.row("select [1, 32, 99, null, -4]::int[]", .{})) orelse unreachable;
+defer row.deinit();
+
+const list = row.list(?i32, 0).?;
+try t.expectEqual(5, list.len);
+try t.expectEqual(1, list.get(0).?);
+try t.expectEqual(32, list.get(1).?);
+try t.expectEqual(99, list.get(2).?);
+try t.expectEqual(null, list.get(3));
+try t.expectEqual(-4, list.get(4).?);
+```
+
+`list` always returns a nullable, i.e. `?zuckdb.List(T)`. Besides the `len` field, `get` is used on the provided list to return a value at a specific index. `row.list(T)` works with any of the types supported by `row.get`.
+
+### zuckdb.Enum
 The `zuckdb.Enum` is a special type which exposes two functions: `raw() [*c]const u8` and `rowCache() ![]const u8`.
 
 `raw()` returns a C string directly to the DuckDB enum string value. If you want to turn this into a `[]const u8`, you'll need to wrap it in `std.mem.span`. The value returned `raw` is only valid untli the next iteration.

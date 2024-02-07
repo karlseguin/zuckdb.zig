@@ -40,20 +40,14 @@ pub const Row = struct {
 		}
 	}
 
-	pub fn getList(self: Row, col: usize) ?List {
+	pub fn list(self: Row, comptime T: type, col: usize) ?List(T) {
 		const index = self.index;
 		const column = self.columns[col];
 		if (isNull(column.validity, index)) return null;
 
-		switch (column.data) {
-			.container => |container| switch (container) {
-				.list => |vc| {
-					const entry = vc.entries[index];
-					return List.init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
-				},
-			},
-			else => return null,
-		}
+		const vc = column.data.container.list;
+		const entry = vc.entries[index];
+		return List(T).init(col, vc.child, vc.validity, entry.offset, entry.length);
 	}
 
 	pub fn toMap(self: Row, builder: *MapBuilder) !typed.Map {
@@ -122,8 +116,8 @@ pub const OwningRow = struct {
 		return self.row.get(T, col);
 	}
 
-	pub fn getList(self: OwningRow, comptime T: type, col: usize) ?List(scalarReturn(T)) {
-		return self.row.getList(T, col);
+	pub fn list(self: OwningRow, comptime T: type, col: usize) ?List(T) {
+		return self.row.list(T, col);
 	}
 
 	pub fn deinit(self: OwningRow) void {
@@ -175,17 +169,49 @@ pub const Enum = struct {
 	}
 };
 
+pub fn List(comptime T: type) type {
+	return struct {
+		len: usize,
+		col: usize,
+		_validity: [*c]u64,
+		_offset: usize,
+		_scalar: ColumnData.Scalar,
+
+		const Self = @This();
+
+		fn init(col: usize, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
+			return .{
+				.col = col,
+				.len = length,
+				._offset = offset,
+				._scalar = scalar,
+				._validity = validity,
+			};
+		}
+
+		pub fn get(self: Self, i: usize) T {
+			const index = i + self._offset;
+
+			const TT = switch (@typeInfo(T)) {
+				.Optional => |opt| blk: {
+					if (isNull(self._validity, index)) return null;
+					break :blk opt.child;
+				},
+				else => blk: {
+					lib.assert(isNull(self._validity, index) == false);
+					break :blk T;
+				},
+			};
+
+			return getScalar(TT, self._scalar, index, self.col);
+		}
+	};
+}
+
 fn isNull(validity: [*c]u64, index: usize) bool {
 	const entry_index = index / 64;
 	const entry_mask = index % 64;
 	return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
-}
-
-fn scalarReturn(comptime T: type) type {
-	return switch (T) {
-		[]u8 => []const u8,
-		else => T
-	};
 }
 
 fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize, col: usize) T {
@@ -345,48 +371,6 @@ fn getUUID(scalar: ColumnData.Scalar, index: usize) UUID {
 
 	return buf;
 }
-
-pub const List = struct {
-	len: usize,
-	col: usize,
-	type: ParameterType,
-	_validity: [*c]u64,
-	_offset: usize,
-	_scalar: ColumnData.Scalar,
-
-	fn init(col: usize, parameter_type: ParameterType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) List {
-		return .{
-			.col = col,
-			.len = length,
-			.type = parameter_type,
-			._offset = offset,
-			._scalar = scalar,
-			._validity = validity,
-		};
-	}
-
-	pub fn get(self: List, comptime T: type, i: usize) T {
-		const index = i + self._offset;
-
-		const TT = switch (@typeInfo(T)) {
-			.Optional => |opt| blk: {
-				if (isNull(self._validity, index)) return null;
-				break :blk opt.child;
-			},
-			else => blk: {
-				lib.assert(isNull(self._validity, index) == false);
-				break :blk T;
-			},
-		};
-
-		return getScalar(TT, self._scalar, index, self.col);
-	}
-};
-
-pub const ListInfo = struct {
-	len: usize,
-	type: ParameterType,
-};
 
 const t = std.testing;
 // Test this specifically since there's special handling based on the length
@@ -629,14 +613,13 @@ test "read list" {
 
 		var row = (try rows.next()) orelse unreachable;
 
-		const list = row.getList(0).?;
-		try t.expectEqual(ParameterType.i32, list.type);
+		const list = row.list(?i32, 0).?;
 		try t.expectEqual(5, list.len);
-		try t.expectEqual(1, list.get(i32, 0));
-		try t.expectEqual(32, list.get(?i32, 1).?);
-		try t.expectEqual(99, list.get(i32, 2));
-		try t.expectEqual(null, list.get(?i32, 3));
-		try t.expectEqual(-4, list.get(i32, 4));
+		try t.expectEqual(1, list.get(0).?);
+		try t.expectEqual(32, list.get(1).?);
+		try t.expectEqual(99, list.get(2).?);
+		try t.expectEqual(null, list.get(3));
+		try t.expectEqual(-4, list.get(4).?);
 	}
 
 	{
@@ -644,12 +627,11 @@ test "read list" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		const list = row.getList(0).?;
-		try t.expectEqual(ParameterType.varchar, list.type);
+		const list = row.list(?[]u8, 0).?;
 		try t.expectEqual(3, list.len);
-		try t.expectEqualStrings("tag1", list.get([]u8, 0));
-		try t.expectEqual(null, list.get(?[]u8, 1));
-		try t.expectEqualStrings("tag2", list.get(?[]const u8, 2).?);
+		try t.expectEqualStrings("tag1", list.get(0).?);
+		try t.expectEqual(null, list.get(1));
+		try t.expectEqualStrings("tag2", list.get(2).?);
 	}
 
 	{
@@ -657,12 +639,11 @@ test "read list" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		const list = row.getList(0).?;
-		try t.expectEqual(ParameterType.varchar, list.type);
+		const list = row.list(?[]const u8, 0).?;
 		try t.expectEqual(3, list.len);
-		try t.expectEqualStrings("tag1", list.get(?[]u8, 0).?);
-		try t.expectEqual(null, list.get(?[]u8, 1));
-		try t.expectEqualStrings("tag2", list.get([]u8, 2));
+		try t.expectEqualStrings("tag1", list.get(0).?);
+		try t.expectEqual(null, list.get(1));
+		try t.expectEqualStrings("tag2", list.get(2).?);
 	}
 
 	{
@@ -670,13 +651,12 @@ test "read list" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		const list = row.getList(0).?;
-		try t.expectEqual(ParameterType.@"enum", list.type);
+		const list = row.list(?Enum, 0).?;
 		try t.expectEqual(4, list.len);
-		try t.expectEqualStrings("type_a", try list.get(Enum, 0).rowCache());
-		try t.expectEqual(null, list.get(?Enum, 1));
-		try t.expectEqualStrings("type_b", try list.get(Enum, 2).rowCache());
-		try t.expectEqualStrings("type_a", try list.get(Enum, 3).rowCache());
+		try t.expectEqualStrings("type_a", try list.get(0).?.rowCache());
+		try t.expectEqual(null, list.get(1));
+		try t.expectEqualStrings("type_b", try list.get(2).?.rowCache());
+		try t.expectEqualStrings("type_a", try list.get(3).?.rowCache());
 	}
 }
 
@@ -745,6 +725,19 @@ test "owning row" {
 		const row = (try conn.row("select $1::bigint", .{-991823891832})) orelse unreachable;
 		defer row.deinit();
 		try t.expectEqual(-991823891832, row.get(i64, 0));
+	}
+
+	{
+		const row = (try conn.row("select [1, 32, 99, null, -4]::int[]", .{})) orelse unreachable;
+		defer row.deinit();
+
+		const list = row.list(?i32, 0).?;
+		try t.expectEqual(5, list.len);
+		try t.expectEqual(1, list.get(0).?);
+		try t.expectEqual(32, list.get(1).?);
+		try t.expectEqual(99, list.get(2).?);
+		try t.expectEqual(null, list.get(3));
+		try t.expectEqual(-4, list.get(4).?);
 	}
 }
 
