@@ -19,14 +19,24 @@ pub const Row = struct {
 	index: usize,
 	columns: []ColumnData,
 
-	pub fn get(self: Row, comptime T: type, col: usize) ?scalarReturn(T) {
+	pub fn get(self: Row, comptime T: type, col: usize) T {
 		const index = self.index;
 		const column = self.columns[col];
-		if (isNull(column.validity, index)) return null;
+
+		const TT = switch (@typeInfo(T)) {
+			.Optional => |opt| blk: {
+				if (isNull(column.validity, index)) return null;
+				break :blk opt.child;
+			},
+			else => blk: {
+				lib.assert(isNull(column.validity, index) == false);
+				break :blk T;
+			},
+		};
 
 		switch (column.data) {
-			.scalar => |scalar| return getScalar(T, scalar, index),
-			else => return null,
+			.scalar => |scalar| return getScalar(TT, scalar, index, col),
+			else => unreachable,
 		}
 	}
 
@@ -46,18 +56,8 @@ pub const Row = struct {
 		}
 	}
 
-	pub fn getEnum(self: Row, col: usize) !?[]const u8 {
-		const index = self.index;
-		const column = self.columns[col];
-		if (isNull(column.validity, index)) return null;
-
-		switch (column.data) {
-			.scalar => |scalar| return _getEnum(scalar, col, index),
-			else => return null,
-		}
-	}
-
 	pub fn toMap(self: Row, builder: *MapBuilder) !typed.Map {
+		const index = self.index;
 		const types = builder.types;
 
 		var aa = builder.arena.allocator();
@@ -65,63 +65,46 @@ pub const Row = struct {
 		try map.ensureTotalCapacity(@intCast(types.len));
 		errdefer map.deinit();
 
-		for (types, builder.names, 0..) |tpe, name, i| {
+		for (types, builder.names, 0..) |tpe, name, col| {
+			const column = self.columns[col];
+
+			if (isNull(column.validity, index)) {
+				try map.putAssumeCapacity(name, null);
+				continue;
+			}
+
 			switch (tpe) {
-				.varchar, .blob => {
-					if (self.get([]u8, i)) |value| {
-						try map.putAssumeCapacity(name, try aa.dupe(u8, value));
-					} else {
-						try map.putAssumeCapacity(name, null);
-					}
-				},
-				.bool => try map.putAssumeCapacity(name, self.get(bool, i)),
-				.i8 => try map.putAssumeCapacity(name, self.get(i8, i)),
-				.i16 => try map.putAssumeCapacity(name, self.get(i16, i)),
-				.i32 => try map.putAssumeCapacity(name, self.get(i32, i)),
-				.i64 => try map.putAssumeCapacity(name, self.get(i64, i)),
-				.u8 => try map.putAssumeCapacity(name, self.get(u8, i)),
-				.u16 => try map.putAssumeCapacity(name, self.get(u16, i)),
-				.u32 => try map.putAssumeCapacity(name, self.get(u32, i)),
-				.u64 => try map.putAssumeCapacity(name, self.get(u64, i)),
-				.f32 => try map.putAssumeCapacity(name, self.get(f32, i)),
-				.f64, .decimal => try map.putAssumeCapacity(name, self.get(f64, i)),
-				.i128 => try map.putAssumeCapacity(name, self.get(i128, i)),
-				.uuid => {
-					if (self.get(UUID, i)) |uuid| {
-						try map.putAssumeCapacity(name, try aa.dupe(u8, &uuid));
-					} else {
-						try map.putAssumeCapacity(name, null);
-					}
-				},
+				.varchar, .blob => try map.putAssumeCapacity(name, try aa.dupe(u8, self.get([]const u8, col))),
+				.bool => try map.putAssumeCapacity(name, self.get(bool, col)),
+				.i8 => try map.putAssumeCapacity(name, self.get(i8, col)),
+				.i16 => try map.putAssumeCapacity(name, self.get(i16, col)),
+				.i32 => try map.putAssumeCapacity(name, self.get(i32, col)),
+				.i64 => try map.putAssumeCapacity(name, self.get(i64, col)),
+				.u8 => try map.putAssumeCapacity(name, self.get(u8, col)),
+				.u16 => try map.putAssumeCapacity(name, self.get(u16, col)),
+				.u32 => try map.putAssumeCapacity(name, self.get(u32, col)),
+				.u64 => try map.putAssumeCapacity(name, self.get(u64, col)),
+				.f32 => try map.putAssumeCapacity(name, self.get(f32, col)),
+				.f64, .decimal => try map.putAssumeCapacity(name, self.get(f64, col)),
+				.i128 => try map.putAssumeCapacity(name, self.get(i128, col)),
+				.uuid => try map.putAssumeCapacity(name, try aa.dupe(u8, &self.get(UUID, col))),
 				.date => {
-					if (self.get(Date, i)) |date| {
-						try map.putAssumeCapacity(name, typed.Date{
-							.year = @intCast(date.year),
-							.month = @intCast(date.month),
-							.day = @intCast(date.day),
-						});
-					} else {
-						try map.putAssumeCapacity(name, null);
-					}
+					const date = self.get(Date, col);
+					try map.putAssumeCapacity(name, typed.Date{
+						.year = @intCast(date.year),
+						.month = @intCast(date.month),
+						.day = @intCast(date.day),
+					});
 				},
 				.time => {
-					if (self.get(Time, i)) |time| {
-						try map.putAssumeCapacity(name, typed.Time{
-							.hour = @intCast(time.hour),
-							.min =  @intCast(time.min),
-							.sec =  @intCast(time.sec),
-						});
-					} else {
-						try map.putAssumeCapacity(name, null);
-					}
+					const time = self.get(Time, col);
+					try map.putAssumeCapacity(name, typed.Time{
+						.hour = @intCast(time.hour),
+						.min =  @intCast(time.min),
+						.sec =  @intCast(time.sec),
+					});
 				},
-				.timestamp => {
-					if (self.get(i64, i)) |micros| {
-						try map.putAssumeCapacity(name, typed.Timestamp{.micros = micros});
-					} else {
-						try map.putAssumeCapacity(name, null);
-					}
-				},
+				.timestamp => try map.putAssumeCapacity(name, typed.Timestamp{.micros =  self.get(i64, col)}),
 				else => return error.UnsupportedMapType,
 			}
 		}
@@ -135,12 +118,8 @@ pub const OwningRow = struct {
 	row: Row,
 	rows: Rows,
 
-	pub fn get(self: OwningRow, comptime T: type, col: usize) ?scalarReturn(T) {
+	pub fn get(self: OwningRow, comptime T: type, col: usize) T {
 		return self.row.get(T, col);
-	}
-
-	pub fn getEnum(self: OwningRow, col: usize) !?[]const u8 {
-		return self.row.getEnum(col);
 	}
 
 	pub fn getList(self: OwningRow, comptime T: type, col: usize) ?List(scalarReturn(T)) {
@@ -170,6 +149,32 @@ pub const MapBuilder = struct {
 	}
 };
 
+pub const Enum = struct {
+	idx: usize,
+	_col: usize,
+	_rows: *Rows,
+	_logical_type: c.duckdb_logical_type,
+
+	pub fn rowCache(self: Enum) ![]const u8 {
+		const rows = self._rows;
+		var gop1 = try rows.enum_name_cache.getOrPut(self._col);
+		if (!gop1.found_existing) {
+			gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
+		}
+
+		const gop2 = try gop1.value_ptr.getOrPut(self.idx);
+		if (!gop2.found_existing) {
+			const string_value = c.duckdb_enum_dictionary_value(self._logical_type, self.idx);
+			gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));
+		}
+		return gop2.value_ptr.*;
+	}
+
+	pub fn raw(self: Enum) [*c]const u8 {
+		return c.duckdb_enum_dictionary_value(self._logical_type, self.idx);
+	}
+};
+
 fn isNull(validity: [*c]u64, index: usize) bool {
 	const entry_index = index / 64;
 	const entry_mask = index % 64;
@@ -183,30 +188,58 @@ fn scalarReturn(comptime T: type) type {
 	};
 }
 
-fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize) ?scalarReturn(T) {
+fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize, col: usize) T {
 	switch (T) {
 		[]u8, []const u8 => return getBlob(scalar, index),
-		i8 => return getI8(scalar, index),
-		i16 => return getI16(scalar, index),
-		i32 => return getI32(scalar, index),
-		i64 => return getI64(scalar, index),
-		i128 => return getI128(scalar, index),
-		u8 => return getU8(scalar, index),
-		u16 => return getU16(scalar, index),
-		u32 => return getU32(scalar, index),
-		u64 => return getU64(scalar, index),
-		f32 => return getF32(scalar, index),
-		f64 => return getF64(scalar, index),
-		bool => return getBool(scalar, index),
-		Date => return getDate(scalar, index),
-		Time => return getTime(scalar, index),
-		Interval => return getInterval(scalar, index),
+		i8 => return scalar.i8[index],
+		i16 => return scalar.i16[index],
+		i32 => return scalar.i32[index],
+		i64 => switch (scalar) {
+			.i64 => |vc| return vc[index],
+			.timestamp => |vc| return vc[index].micros,
+			else => unreachable,
+		},
+		i128 => return scalar.i128[index],
+		u8 => return scalar.u8[index],
+		u16 => return scalar.u16[index],
+		u32 => return scalar.u32[index],
+		u64 => return scalar.u64[index],
+		f32 => return scalar.f32[index],
+		f64 => switch (scalar) {
+			.f64 => |vc| return vc[index],
+			.decimal => |vc| {
+				const value = switch (vc.internal) {
+					inline else => |internal| lib.hugeInt(internal[index]),
+				};
+				return c.duckdb_decimal_to_double(c.duckdb_decimal{
+					.width = vc.width,
+					.scale = vc.scale,
+					.value = value,
+				});
+			},
+			else => unreachable,
+		},
+		bool => return scalar.bool[index],
+		Date => return c.duckdb_from_date(scalar.date[index]),
+		Time => return c.duckdb_from_time(scalar.time[index]),
+		Interval => return scalar.interval[index],
+		Enum => {
+			const e = scalar.@"enum";
+			return Enum{
+				.idx = switch (e.internal) {
+					inline else => |internal| internal[index],
+				},
+				._col = col,
+				._rows = e.rows,
+				._logical_type = e.logical_type,
+			};
+		},
 		UUID => return getUUID(scalar, index),
 		else => @compileError("Cannot get value of type " ++ @typeName(T)),
 	}
 }
 
-fn getBlob(scalar: ColumnData.Scalar, index: usize) ?[]const u8 {
+fn getBlob(scalar: ColumnData.Scalar, index: usize) []u8 {
 	switch (scalar) {
 		.blob => |vc| {
 			// This sucks. This is an untagged union. But both versions (inlined and pointer)
@@ -222,50 +255,14 @@ fn getBlob(scalar: ColumnData.Scalar, index: usize) ?[]const u8 {
 			const pointer = value.value.pointer;
 			return pointer.ptr[0..len];
 		},
-		else => return null,
-	}
-}
-
-fn getI8(scalar: ColumnData.Scalar, index: usize) ?i8 {
-	switch (scalar) {
-		.i8 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getI16(scalar: ColumnData.Scalar, index: usize) ?i16 {
-	switch (scalar) {
-		.i16 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getI32(scalar: ColumnData.Scalar, index: usize) ?i32 {
-	switch (scalar) {
-		.i32 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getI64(scalar: ColumnData.Scalar, index: usize) ?i64 {
-	switch (scalar) {
-		.i64 => |vc| return vc[index],
-		.timestamp => |vc| return vc[index].micros,
-		else => return null,
-	}
-}
-
-fn getI128(scalar: ColumnData.Scalar, index: usize) ?i128 {
-	switch (scalar) {
-		.i128 => |vc| return vc[index],
-		else => return null,
+	else => unreachable,
 	}
 }
 
 // largely taken from duckdb's uuid type
-fn getUUID(scalar: ColumnData.Scalar, index: usize) ?UUID {
+fn getUUID(scalar: ColumnData.Scalar, index: usize) UUID {
 	const hex = "0123456789abcdef";
-	const n = getI128(scalar, index) orelse return null;
+	const n = scalar.i128[index];
 
 	const h = lib.hugeInt(n);
 
@@ -349,112 +346,6 @@ fn getUUID(scalar: ColumnData.Scalar, index: usize) ?UUID {
 	return buf;
 }
 
-fn getU8(scalar: ColumnData.Scalar, index: usize) ?u8 {
-	switch (scalar) {
-		.u8 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getU16(scalar: ColumnData.Scalar, index: usize) ?u16 {
-	switch (scalar) {
-		.u16 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getU32(scalar: ColumnData.Scalar, index: usize) ?u32 {
-	switch (scalar) {
-		.u32 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getU64(scalar: ColumnData.Scalar, index: usize) ?u64 {
-	switch (scalar) {
-		.u64 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getBool(scalar: ColumnData.Scalar, index: usize) ?bool {
-	switch (scalar) {
-		.bool => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getF32(scalar: ColumnData.Scalar, index: usize) ?f32 {
-	switch (scalar) {
-		.f32 => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn getF64(scalar: ColumnData.Scalar, index: usize) ?f64 {
-	switch (scalar) {
-		.f64 => |vc| return vc[index],
-		.decimal => |vc| {
-			const value = switch (vc.internal) {
-				inline else => |internal| lib.hugeInt(internal[index]),
-			};
-			return c.duckdb_decimal_to_double(c.duckdb_decimal{
-				.width = vc.width,
-				.scale = vc.scale,
-				.value = value,
-			});
-		},
-		else => return null,
-	}
-}
-
-fn getDate(scalar: ColumnData.Scalar, index: usize) ?Date {
-	switch (scalar) {
-		.date => |vc| return c.duckdb_from_date(vc[index]),
-		else => return null,
-	}
-}
-
-fn getTime(scalar: ColumnData.Scalar, index: usize) ?Time {
-	switch (scalar) {
-		.time => |vc| return c.duckdb_from_time(vc[index]),
-		else => return null,
-	}
-}
-
-fn getInterval(scalar: ColumnData.Scalar, index: usize) ?Interval {
-	switch (scalar) {
-		.interval => |vc| return vc[index],
-		else => return null,
-	}
-}
-
-fn _getEnum(scalar: ColumnData.Scalar, col: usize, index: usize) !?[]const u8 {
-	switch (scalar) {
-		.@"enum" => |enm| {
-			const enum_index = switch (enm.internal) {
-				.u8 => |internal| internal[index],
-				.u16 => |internal| internal[index],
-				.u32 => |internal| internal[index],
-				.u64 => |internal| internal[index],
-			};
-			var rows = enm.rows;
-			var gop1 = try rows.enum_name_cache.getOrPut(col);
-			if (!gop1.found_existing) {
-				gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
-			}
-
-			const gop2 = try gop1.value_ptr.getOrPut(enum_index);
-			if (!gop2.found_existing) {
-				const string_value = c.duckdb_enum_dictionary_value(enm.logical_type, enum_index);
-				gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));
-			}
-			return gop2.value_ptr.*;
-		},
-		else => return null,
-	}
-}
-
 pub const List = struct {
 	len: usize,
 	col: usize,
@@ -474,16 +365,21 @@ pub const List = struct {
 		};
 	}
 
-	pub fn get(self: List, comptime T: type, i: usize) ?scalarReturn(T) {
+	pub fn get(self: List, comptime T: type, i: usize) T {
 		const index = i + self._offset;
-		if (isNull(self._validity, index)) return null;
-		return getScalar(T, self._scalar, index);
-	}
 
-	pub fn getEnum(self: List, i: usize) !?[]const u8 {
-		const index = i + self._offset;
-		if (isNull(self._validity, index)) return null;
-		return _getEnum(self._scalar, self.col, index);
+		const TT = switch (@typeInfo(T)) {
+			.Optional => |opt| blk: {
+				if (isNull(self._validity, index)) return null;
+				break :blk opt.child;
+			},
+			else => blk: {
+				lib.assert(isNull(self._validity, index) == false);
+				break :blk T;
+			},
+		};
+
+		return getScalar(TT, self._scalar, index, self.col);
 	}
 };
 
@@ -516,15 +412,35 @@ test "read varchar" {
 		, .{});
 		defer rows.deinit();
 
-		try t.expectEqualStrings("1", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("12345", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("123456789A", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("123456789AB", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("123456789ABC", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("123456789ABCD", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("123456789ABCDE", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualStrings("123456789ABCDEF", (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqual(null, (try rows.next()).?.get([]const u8, 0));
+		{
+			const row = (try rows.next()).?;
+			try t.expectEqualStrings("1", row.get([]u8, 0));
+			try t.expectEqualStrings("1", row.get(?[]u8, 0).?);
+			try t.expectEqualStrings("1", row.get([]const u8, 0));
+			try t.expectEqualStrings("1", row.get(?[]const u8, 0).?);
+		}
+
+		try t.expectEqualStrings("12345", (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualStrings("123456789A", (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualStrings("123456789AB", (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualStrings("123456789ABC", (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualStrings("123456789ABCD", (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualStrings("123456789ABCDE", (try rows.next()).?.get([]const u8, 0));
+
+		{
+			const row = (try rows.next()).?;
+			try t.expectEqualStrings("123456789ABCDEF", row.get([]u8, 0));
+			try t.expectEqualStrings("123456789ABCDEF", row.get(?[]u8, 0).?);
+			try t.expectEqualStrings("123456789ABCDEF", row.get([]const u8, 0));
+			try t.expectEqualStrings("123456789ABCDEF", row.get(?[]const u8, 0).?);
+		}
+
+		{
+			const row = (try rows.next()).?;
+			try t.expectEqual(null, row.get(?[]u8, 0));
+			try t.expectEqual(null, row.get(?[]const u8, 0));
+		}
+
 		try t.expectEqual(null, try rows.next());
 	}
 }
@@ -547,10 +463,10 @@ test "read blob" {
 		, .{});
 		defer rows.deinit();
 
-		try t.expectEqualSlices(u8, @as([]const u8, &.{170}), (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171, 170, 170, 170, 170, 171, 170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0).?);
-		try t.expectEqual(null, (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualSlices(u8, @as([]const u8, &.{170}), (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqualSlices(u8, @as([]const u8, &.{170, 170, 170, 170, 171, 170, 170, 170, 170, 171, 170, 170, 170, 170, 171}), (try rows.next()).?.get([]const u8, 0));
+		try t.expectEqual(null, (try rows.next()).?.get(?[]const u8, 0));
 		try t.expectEqual(null, try rows.next());
 	}
 }
@@ -575,44 +491,44 @@ test "read ints" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(0, row.get(i8, 0).?);
-		try t.expectEqual(0, row.get(i16,1).?);
-		try t.expectEqual(0, row.get(i32, 2).?);
-		try t.expectEqual(0, row.get(i64, 3).?);
-		try t.expectEqual(0, row.get(i128, 4).?);
-		try t.expectEqual(0, row.get(u8, 5).?);
-		try t.expectEqual(0, row.get(u16, 6).?);
-		try t.expectEqual(0, row.get(u32, 7).?);
-		try t.expectEqual(0, row.get(u64, 8).?);
+		try t.expectEqual(0, row.get(i8, 0));
+		try t.expectEqual(0, row.get(i16,1));
+		try t.expectEqual(0, row.get(i32, 2));
+		try t.expectEqual(0, row.get(i64, 3));
+		try t.expectEqual(0, row.get(i128, 4));
+		try t.expectEqual(0, row.get(u8, 5));
+		try t.expectEqual(0, row.get(u16, 6));
+		try t.expectEqual(0, row.get(u32, 7));
+		try t.expectEqual(0, row.get(u64, 8));
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(127, row.get(i8, 0).?);
-		try t.expectEqual(32767, row.get(i16,1).?);
-		try t.expectEqual(2147483647, row.get(i32, 2).?);
-		try t.expectEqual(9223372036854775807, row.get(i64, 3).?);
-		try t.expectEqual(170141183460469231731687303715884105727, row.get(i128, 4).?);
-		try t.expectEqual(255, row.get(u8, 5).?);
-		try t.expectEqual(65535, row.get(u16, 6).?);
-		try t.expectEqual(4294967295, row.get(u32, 7).?);
-		try t.expectEqual(18446744073709551615, row.get(u64, 8).?);
+		try t.expectEqual(127, row.get(i8, 0));
+		try t.expectEqual(32767, row.get(i16,1));
+		try t.expectEqual(2147483647, row.get(i32, 2));
+		try t.expectEqual(9223372036854775807, row.get(i64, 3));
+		try t.expectEqual(170141183460469231731687303715884105727, row.get(i128, 4));
+		try t.expectEqual(255, row.get(u8, 5));
+		try t.expectEqual(65535, row.get(u16, 6));
+		try t.expectEqual(4294967295, row.get(u32, 7));
+		try t.expectEqual(18446744073709551615, row.get(u64, 8));
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(-127, row.get(i8, 0).?);
-		try t.expectEqual(-32767, row.get(i16,1).?);
-		try t.expectEqual(-2147483647, row.get(i32, 2).?);
-		try t.expectEqual(-9223372036854775807, row.get(i64, 3).?);
-		try t.expectEqual(-170141183460469231731687303715884105727, row.get(i128, 4).?);
+		try t.expectEqual(-127, row.get(i8, 0));
+		try t.expectEqual(-32767, row.get(i16,1));
+		try t.expectEqual(-2147483647, row.get(i32, 2));
+		try t.expectEqual(-9223372036854775807, row.get(i64, 3));
+		try t.expectEqual(-170141183460469231731687303715884105727, row.get(i128, 4));
 
 		row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(null, row.get(i8, 0));
-		try t.expectEqual(null, row.get(i16,1));
-		try t.expectEqual(null, row.get(i32, 2));
-		try t.expectEqual(null, row.get(i64, 3));
-		try t.expectEqual(null, row.get(i128, 4));
-		try t.expectEqual(null, row.get(u8, 5));
-		try t.expectEqual(null, row.get(u16, 6));
-		try t.expectEqual(null, row.get(u32, 7));
-		try t.expectEqual(null, row.get(u64, 8));
+		try t.expectEqual(null, row.get(?i8, 0));
+		try t.expectEqual(null, row.get(?i16,1));
+		try t.expectEqual(null, row.get(?i32, 2));
+		try t.expectEqual(null, row.get(?i64, 3));
+		try t.expectEqual(null, row.get(?i128, 4));
+		try t.expectEqual(null, row.get(?u8, 5));
+		try t.expectEqual(null, row.get(?u16, 6));
+		try t.expectEqual(null, row.get(?u32, 7));
+		try t.expectEqual(null, row.get(?u64, 8));
 
 		try t.expectEqual(null, try rows.next());
 	}
@@ -630,9 +546,9 @@ test "read bool" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(false, row.get(bool, 0).?);
-		try t.expectEqual(true, row.get(bool, 1).?);
-		try t.expectEqual(null, row.get(bool, 2));
+		try t.expectEqual(false, row.get(bool, 0));
+		try t.expectEqual(true, row.get(bool, 1));
+		try t.expectEqual(null, row.get(?bool, 2));
 
 		try t.expectEqual(null, try rows.next());
 	}
@@ -650,10 +566,10 @@ test "read float" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(32.329, row.get(f32, 0).?);
-		try t.expectEqual(-0.29291, row.get(f64, 1).?);
-		try t.expectEqual(null, row.get(f32, 2));
-		try t.expectEqual(null, row.get(f64, 3));
+		try t.expectEqual(32.329, row.get(f32, 0));
+		try t.expectEqual(-0.29291, row.get(f64, 1));
+		try t.expectEqual(null, row.get(?f32, 2));
+		try t.expectEqual(null, row.get(?f64, 3));
 
 		try t.expectEqual(null, try rows.next());
 	}
@@ -672,11 +588,11 @@ test "read decimal" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(1.23, row.get(f64, 0).?);
-		try t.expectEqual(1.24, row.get(f64, 1).?);
-		try t.expectEqual(1.25, row.get(f64, 2).?);
-		try t.expectEqual(1.26, row.get(f64, 3).?);
-		try t.expectEqual(1.27, row.get(f64, 4).?);
+		try t.expectEqual(1.23, row.get(f64, 0));
+		try t.expectEqual(1.24, row.get(f64, 1));
+		try t.expectEqual(1.25, row.get(f64, 2));
+		try t.expectEqual(1.26, row.get(f64, 3));
+		try t.expectEqual(1.27, row.get(f64, 4));
 	}
 }
 
@@ -692,9 +608,9 @@ test "read date & time" {
 		defer rows.deinit();
 
 		var row = (try rows.next()) orelse unreachable;
-		try t.expectEqual(Date{.year = 1992, .month = 9, .day = 20}, row.get(Date, 0).?);
-		try t.expectEqual(Time{.hour = 14, .min = 21, .sec = 13, .micros = 332000}, row.get(Time, 1).?);
-		try t.expectEqual(751203002000000, row.get(i64, 2).?);
+		try t.expectEqual(Date{.year = 1992, .month = 9, .day = 20}, row.get(Date, 0));
+		try t.expectEqual(Time{.hour = 14, .min = 21, .sec = 13, .micros = 332000}, row.get(Time, 1));
+		try t.expectEqual(751203002000000, row.get(i64, 2));
 	}
 }
 
@@ -716,11 +632,11 @@ test "read list" {
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.i32, list.type);
 		try t.expectEqual(5, list.len);
-		try t.expectEqual(1, list.get(i32, 0).?);
-		try t.expectEqual(32, list.get(i32, 1).?);
-		try t.expectEqual(99, list.get(i32, 2).?);
-		try t.expectEqual(null, list.get(i32, 3));
-		try t.expectEqual(-4, list.get(i32, 4).?);
+		try t.expectEqual(1, list.get(i32, 0));
+		try t.expectEqual(32, list.get(?i32, 1).?);
+		try t.expectEqual(99, list.get(i32, 2));
+		try t.expectEqual(null, list.get(?i32, 3));
+		try t.expectEqual(-4, list.get(i32, 4));
 	}
 
 	{
@@ -731,9 +647,9 @@ test "read list" {
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.varchar, list.type);
 		try t.expectEqual(3, list.len);
-		try t.expectEqualStrings("tag1", list.get([]u8, 0).?);
-		try t.expectEqual(null, list.get([]u8, 1));
-		try t.expectEqualStrings("tag2", list.get([]u8, 2).?);
+		try t.expectEqualStrings("tag1", list.get([]u8, 0));
+		try t.expectEqual(null, list.get(?[]u8, 1));
+		try t.expectEqualStrings("tag2", list.get(?[]const u8, 2).?);
 	}
 
 	{
@@ -744,9 +660,9 @@ test "read list" {
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.varchar, list.type);
 		try t.expectEqual(3, list.len);
-		try t.expectEqualStrings("tag1", list.get([]u8, 0).?);
-		try t.expectEqual(null, list.get([]u8, 1));
-		try t.expectEqualStrings("tag2", list.get([]u8, 2).?);
+		try t.expectEqualStrings("tag1", list.get(?[]u8, 0).?);
+		try t.expectEqual(null, list.get(?[]u8, 1));
+		try t.expectEqualStrings("tag2", list.get([]u8, 2));
 	}
 
 	{
@@ -757,10 +673,10 @@ test "read list" {
 		const list = row.getList(0).?;
 		try t.expectEqual(ParameterType.@"enum", list.type);
 		try t.expectEqual(4, list.len);
-		try t.expectEqualStrings("type_a", (try list.getEnum(0)).?);
-		try t.expectEqual(null, try list.getEnum(1));
-		try t.expectEqualStrings("type_b", (try list.getEnum(2)).?);
-		try t.expectEqualStrings("type_a", (try list.getEnum(3)).?);
+		try t.expectEqualStrings("type_a", try list.get(Enum, 0).rowCache());
+		try t.expectEqual(null, list.get(?Enum, 1));
+		try t.expectEqualStrings("type_b", try list.get(Enum, 2).rowCache());
+		try t.expectEqualStrings("type_a", try list.get(Enum, 3).rowCache());
 	}
 }
 
@@ -783,24 +699,27 @@ test "read enum" {
 	defer rows.deinit();
 
 	var row = (try rows.next()) orelse unreachable;
-	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
-	try t.expectEqualStrings("type_b", (try row.getEnum(1)).?);
-	try t.expectEqual(null, (try row.getEnum(2)));
-	try t.expectEqualStrings("type_a", (try row.getEnum(3)).?);
-	try t.expectEqualStrings("keemun", (try row.getEnum(4)).?);
-	try t.expectEqualStrings("silver_needle", (try row.getEnum(5)).?);
-	try t.expectEqual(null, (try row.getEnum(6)));
-	try t.expectEqualStrings("silver_needle", (try row.getEnum(7)).?);
+	try t.expectEqualStrings("type_a", std.mem.span(row.get(Enum, 0).raw()));
+	try t.expectEqualStrings("type_a", try row.get(Enum, 0).rowCache());
+	try t.expectEqualStrings("type_a", try row.get(Enum, 0).rowCache());
+	try t.expectEqualStrings("type_b", try row.get(Enum, 1).rowCache());
+	try t.expectEqualStrings("type_b", try row.get(?Enum, 1).?.rowCache());
+	try t.expectEqual(null, row.get(?Enum, 2));
+	try t.expectEqualStrings("type_a", try row.get(Enum, 3).rowCache());
+	try t.expectEqualStrings("keemun", try row.get(Enum, 4).rowCache());
+	try t.expectEqualStrings("silver_needle", std.mem.span(row.get(Enum, 5).raw()));
+	try t.expectEqual(null, row.get(?Enum, 6));
+	try t.expectEqualStrings("silver_needle", try row.get(Enum, 7).rowCache());
 
 	row = (try rows.next()) orelse unreachable;
-	try t.expectEqualStrings("type_b", (try row.getEnum(0)).?);
-	try t.expectEqual(null, (try row.getEnum(1)));
-	try t.expectEqualStrings("type_a", (try row.getEnum(2)).?);
-	try t.expectEqualStrings("type_b", (try row.getEnum(3)).?);
-	try t.expectEqualStrings("keemun", (try row.getEnum(4)).?);
-	try t.expectEqualStrings("silver_needle", (try row.getEnum(5)).?);
-	try t.expectEqual(null, (try row.getEnum(6)));
-	try t.expectEqualStrings("silver_needle", (try row.getEnum(7)).?);
+	try t.expectEqualStrings("type_b", try row.get(Enum, 0).rowCache());
+	try t.expectEqual(null, row.get(?Enum, 1));
+	try t.expectEqualStrings("type_a", try row.get(Enum, 2).rowCache());
+	try t.expectEqualStrings("type_b", try row.get(Enum, 3).rowCache());
+	try t.expectEqualStrings("keemun", try row.get(?Enum, 4).?.rowCache());
+	try t.expectEqualStrings("silver_needle", try row.get(Enum, 5).rowCache());
+	try t.expectEqual(null, row.get(?Enum, 6));
+	try t.expectEqualStrings("silver_needle", try row.get(Enum, 7).rowCache());
 }
 
 test "owning row" {
@@ -825,7 +744,7 @@ test "owning row" {
 	{
 		const row = (try conn.row("select $1::bigint", .{-991823891832})) orelse unreachable;
 		defer row.deinit();
-		try t.expectEqual(-991823891832, row.get(i64, 0).?);
+		try t.expectEqual(-991823891832, row.get(i64, 0));
 	}
 }
 

@@ -45,25 +45,90 @@ const zqlite = b.dependency("zqlite", .{
 exe.root_module.addImport("zqlite", zqlite.module("pg"));
 ```
 
-## Errors
+## DB
+The `DB` is used to intialize the database, open connections and, optionally, create a connection pool.
 
-### DB.init
-Rather than calling `DB.init`, you can call `DB.initWithErr` and pass an optional string pointer. If the function returns `error.OpenDB` then the error string will be set. You must free this string when done:
+## init
+Creates or opens the database.
 
 ```zig
-var err: ?[]u8 = null;
-const db = DB.initWithErr(allocator, "/tmp/does/not/exist/zuckdb", .{}, &err) catch |err| {
+// can use the special path ":memory:" for an in-memory database
+const db = try DB.init(t.allocator, "/tmp/db.duckdb", .{});
+defer db.deinit();
+```
+
+The 3rd parameter is for options. The available options, with their default, are:
+
+* `access_mode` - Sets the `access_mode` DuckDB configuration. Defaults to `.automatic`. Valid options are: `.automatic`, `.read_only` or `.read_write`.
+* `enable_external_access` - Sets the `enable_external_access` DuckDB configuration. Defaults to `true`.
+
+## initWithErr
+Same as `init`, but takes a 4th output parameter. On open failure, the output parameter will be set to the error message. This parameter must be freed if set.
+
+```zig
+var open_err: ?[]u8 = null;
+const db = DB.initWithErr(allocator, "/does/not/exist", .{}, &err) catch |err| {
     if (err == error.OpenDB) {
-        defer allocator.free(err.?);
-        std.debug.print("DB open: {}", .{err.?});
+        defer allocator.free(open_err.?);
+        std.debug.print("DB open: {}", .{open_err.?});
     }
     return err;
 };
-try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/does/not/exist/zuckdb\": No such file or directory", err.?);
-t.allocator.free(err.?);
+```
 
+### deinit
+Closes the database.
 
-A call that returns an `error.DuckDBError` will have the `conn.err` field set to an error description:
+### conn
+Returns a new connection object. 
+
+```zig
+var conn = try db.conn();
+defer conn.deinit();
+...
+```
+
+### pool
+Initializes a pool of connections to the DB.
+
+```zig
+var pool = db.pool(.{.size = 2});
+defer pool.deinit();
+
+var conn = pool.acquire();
+defer pool.release(conn);
+```
+
+## Conn
+
+### Query
+Use `conn.query(sql, args)` to query the database and return a `zuckdb.Rows` which can be iterated. You must call `deinit` on the returned rows.
+
+```zig
+var rows = try conn.query("select * from users where power > $1", .{9000});
+defer rows.deinit();
+while (try rows.next()) |row| {
+    // ...
+}
+```
+
+### Exec
+`conn.exec(sql, args)` is a wrapper around `query` which returns the number of affected rows for insert, updates or deletes.
+
+### Row
+`conn.row(sql, args)` is a wrapper around `query` which returns a single optional row. You must call `deinit` on the returned row:
+
+```zig
+var row = (try conn.query("select * from users where id = $1", .{22})) orelse return null;;
+defer row.deinit();
+// ...
+```
+
+### begin/commit/rollback
+The `conn.begin()`, `conn.commit()` and `conn.rollback()` calls are wrappers around `exec`, e.g.: `conn.exec("begin", .{})`.
+
+### DuckDBError
+If a method of `conn` returns `error.DuckDBError`, `conn.err` will be set:
 
 ```zig
 const rows = conn.query("....", .{}) catch |err| {
@@ -76,20 +141,23 @@ const rows = conn.query("....", .{}) catch |err| {
 }
 ```
 
-In the above snippet, it's possible to skip the if (err == error.DuckDBError) check, but in that case conn.err could be set from some previous command (conn.err is always reset when acquired from the pool).
+In the above snippet, it's possible to skip the `if (err == error.DuckDBError)`check, but in that case conn.err could be set from some previous command (conn.err is always reset when acquired from the pool).
 
-If error.DuckDBError is returned from a non-connection object, like a query result, the associated connection will have its conn.err set. In other words, conn.err is the only thing you ever have to check.
-
-## Rows and Row
-The `rows` returned from `conn.squery` exposes the following methods:
+## Rows
+The `rows` returned from `conn.query` exposes the following methods:
 
 * `count()` - the number of rows in the result
 * `changed()` - the number of updated/deleted/inserted rows
 * `columnName(i: usize)` - the column name at position `i` in a result
+* `deinit()` - must be called to free resources associated with the result
+* `next() !?Row` - returns the next row
 
 The most important method on `rows` is `next()` which is used to iterate the results. `next()` is a typical Zig iterator and returns a `?Row` which will be null when no more rows exist to be iterated.
 
-`Row` exposes a `get(T, index) ?T`, `getList(index) ?List` and `getEnum(index) !?[]const u8` function.
+## Row
+
+### get
+`Row` exposes a `get(T, index) T` function. This function trusts you! If you ask for an <code>i32</code> the library will crash if the column is not an <code>int4</code>. Similarl, if the value can be null, you must use the optional type, e.g. <code>?i32</code>.
 
 The supported types for `get`, are:
 * `[]u8`, 
@@ -110,27 +178,21 @@ The supported types for `get`, are:
 * `zuckdb.Time`
 * `zuckdb.Interval`
 * `zuckdb.UUID`
+* `zudkdb.Enum`
 
-There are a few important notes. First calling `get` with the wrong type will result in `null` being returned. Second, `get(T, i)` usually returns a `?T`. The only exception to this is `get([]u8, i)` which returns a `[]const u8` - I just didn't want to type `get([]const u8)` all the time. Strings returned by get are only valid until the next call to `next()` or `rows.deinit()`.
+Optional version of the above are all supported **and must be used** if it's possible the value is null.
 
-`row.getList(i)` is used to fetch a list from duckdb. It returns a type that exposes a `len` and `get(T, i) ?T` function:
+String values and enums are only valid until the next call to `next()` or `deinit`. You must dupe the values if you want them to outlive the row.s
+
+### Enum
+The `zuckdb.Enum` is a special type which exposes two functions: `raw() [*c]const u8` and `rowCache() ![]const u8`.
+
+`raw()` returns a C string directly to the DuckDB enum string value. If you want to turn this into a `[]const u8`, you'll need to wrap it in `std.mem.span`. The value returned `raw` is only valid untli the next iteration.
+
+`rowCache()` takes the result of `raw()`, and dupes it, giving ownerning to the Rows. Thus, the string returned by `rowCache()` outlives the current row iteration and is valid until `rows.deinit()` is called. Essentially, it is an interned string representation fo the enum value (which DuckDB internally represents as an integer).
 
 
-```zig
-const tags = row.getList(3) orelse unreachable; // TODO handle null properly
-for (0..tags.len) |i| {
-    const tag = tags.get([]u8, i);
-    // get returns a nullable, so above, tag could be null
-}
-```
-
-`row.getEnum(i)` returns the string representation of an enum. Unlike strings returned from `row.get([]u8, i)`, the returned string is valid until `rows.deinit()` (the enum string value is interned within the `rows`, thus it survives calls to `rows.next()`).
-
-```zig
-const category = (try row.getEnum(3)) orelse "default";
-```
-
-# Pool
+## Pool
 The `zuckdb.Pool` is a thread-safe connection pool:
 
 ```zig

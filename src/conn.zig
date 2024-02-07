@@ -156,7 +156,7 @@ test "conn: exec success" {
 
 	var rows = try conn.query("select * from t", .{});
 	defer rows.deinit();
-	try t.expectEqual(39, (try rows.next()).?.get(i32, 0).?);
+	try t.expectEqual(39, (try rows.next()).?.get(i32, 0));
 }
 
 test "conn: query error" {
@@ -181,7 +181,7 @@ test "conn: query select ok" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(39213, row.get(i32, 0).?);
+	try t.expectEqual(39213, row.get(i32, 0));
 	try t.expectEqual(null, try rows.next());
 }
 
@@ -247,7 +247,7 @@ test "conn: transaction" {
 
 		var rows = try conn.query("select * from t", .{});
 		defer rows.deinit();
-		try t.expectEqual(1, (try rows.next()).?.get(i32, 0).?);
+		try t.expectEqual(1, (try rows.next()).?.get(i32, 0));
 	}
 }
 
@@ -262,8 +262,8 @@ test "conn: query with explicit state" {
 	var rows = try conn.queryWithState("select $1::int, $2::varchar", .{9392, "teg"}, &state);
 	defer rows.deinit();
 	const row = (try rows.next()).?;
-	try t.expectEqual(9392, row.get(i32, 0).?);
-	try t.expectEqualStrings("teg", row.get([]u8, 1).?);
+	try t.expectEqual(9392, row.get(i32, 0));
+	try t.expectEqualStrings("teg", row.get([]u8, 1));
 }
 
 test "conn: sql with different string types" {
@@ -335,6 +335,6 @@ fn testSQLStringType(conn: *Conn, sql: anytype) !void {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(9392, row.get(i32, 0).?);
-	try t.expectEqualStrings("teg", row.get([]u8, 1).?);
+	try t.expectEqual(9392, row.get(i32, 0));
+	try t.expectEqualStrings("teg", row.get([]u8, 1));
 }

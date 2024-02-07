@@ -198,12 +198,12 @@ test "bind: basic types" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(99, row.get(i64, 0).?);
-	try t.expectEqual(-32.01, row.get(f64, 1).?);
-	try t.expectEqual(true, row.get(bool, 2).?);
-	try t.expectEqual(false, row.get(bool, 3).?);
-	try t.expectEqual(null, row.get(i32, 4));
-	try t.expectEqual(44, row.get(i32, 5).?);
+	try t.expectEqual(99, row.get(i64, 0));
+	try t.expectEqual(-32.01, row.get(f64, 1));
+	try t.expectEqual(true, row.get(bool, 2));
+	try t.expectEqual(false, row.get(bool, 3));
+	try t.expectEqual(null, row.get(?i32, 4));
+	try t.expectEqual(44, row.get(i32, 5));
 }
 
 test "bind: int" {
@@ -225,12 +225,12 @@ test "bind: int" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqual(99, row.get(i64, 0).?);
-		try t.expectEqual(2, row.get(i8, 1).?);
-		try t.expectEqual(3, row.get(i16,2).?);
-		try t.expectEqual(4, row.get(i32, 3).?);
-		try t.expectEqual(5, row.get(i64, 4).?);
-		try t.expectEqual(-9955340232221457974987, row.get(i128, 5).?);
+		try t.expectEqual(99, row.get(i64, 0));
+		try t.expectEqual(2, row.get(i8, 1));
+		try t.expectEqual(3, row.get(i16,2));
+		try t.expectEqual(4, row.get(i32, 3));
+		try t.expectEqual(5, row.get(i64, 4));
+		try t.expectEqual(-9955340232221457974987, row.get(i128, 5));
 	}
 
 	{
@@ -244,11 +244,11 @@ test "bind: int" {
 		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(127, row.get(i8, 0).?);
-		try t.expectEqual(32767, row.get(i16,1).?);
-		try t.expectEqual(2147483647, row.get(i32, 2).?);
-		try t.expectEqual(9223372036854775807, row.get(i64, 3).?);
-		try t.expectEqual(170141183460469231731687303715884105727, row.get(i128, 4).?);
+		try t.expectEqual(127, row.get(i8, 0));
+		try t.expectEqual(32767, row.get(i16,1));
+		try t.expectEqual(2147483647, row.get(i32, 2));
+		try t.expectEqual(9223372036854775807, row.get(i64, 3));
+		try t.expectEqual(170141183460469231731687303715884105727, row.get(i128, 4));
 	}
 
 	{
@@ -262,11 +262,11 @@ test "bind: int" {
 		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(-127, row.get(i8, 0).?);
-		try t.expectEqual(-32767, row.get(i16,1).?);
-		try t.expectEqual(-2147483647, row.get(i32, 2).?);
-		try t.expectEqual(-9223372036854775807, row.get(i64, 3).?);
-		try t.expectEqual(-170141183460469231731687303715884105727, row.get(i128, 4).?);
+		try t.expectEqual(-127, row.get(i8, 0));
+		try t.expectEqual(-32767, row.get(i16,1));
+		try t.expectEqual(-2147483647, row.get(i32, 2));
+		try t.expectEqual(-9223372036854775807, row.get(i64, 3));
+		try t.expectEqual(-170141183460469231731687303715884105727, row.get(i128, 4));
 	}
 
 	{
@@ -279,10 +279,10 @@ test "bind: int" {
 		});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqual(255, row.get(u8, 0).?);
-		try t.expectEqual(65535, row.get(u16, 1).?);
-		try t.expectEqual(4294967295, row.get(u32, 2).?);
-		try t.expectEqual(18446744073709551615, row.get(u64, 3).?);
+		try t.expectEqual(255, row.get(u8, 0));
+		try t.expectEqual(65535, row.get(u16, 1));
+		try t.expectEqual(4294967295, row.get(u32, 2));
+		try t.expectEqual(18446744073709551615, row.get(u64, 3));
 	}
 }
 
@@ -302,9 +302,9 @@ test "bind: floats" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(99.88, row.get(f64, 0).?);
-	try t.expectEqual(-3.192, row.get(f32, 1).?);
-	try t.expectEqual(999.182, row.get(f64, 2).?);
+	try t.expectEqual(99.88, row.get(f64, 0));
+	try t.expectEqual(-3.192, row.get(f32, 1));
+	try t.expectEqual(999.182, row.get(f64, 2));
 }
 
 test "bind: decimal" {
@@ -322,8 +322,8 @@ test "bind: decimal" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(1.23, row.get(f64, 0).?);
-	try t.expectEqual(-0.329148, row.get(f64, 1).?);
+	try t.expectEqual(1.23, row.get(f64, 0));
+	try t.expectEqual(-0.329148, row.get(f64, 1));
 }
 
 test "bind: uuid" {
@@ -338,10 +338,10 @@ test "bind: uuid" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqualStrings("578d0df0-a76f-4a8e-a463-42f8a4f133c8", &(row.get(UUID, 0).?));
-	try t.expectEqualStrings("00000000-0000-0000-0000-000000000000", &(row.get(UUID, 1).?));
-	try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 2).?));
-	try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 3).?));
+	try t.expectEqualStrings("578d0df0-a76f-4a8e-a463-42f8a4f133c8", &(row.get(UUID, 0)));
+	try t.expectEqualStrings("00000000-0000-0000-0000-000000000000", &(row.get(UUID, 1)));
+	try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 2)));
+	try t.expectEqualStrings("ffffffff-ffff-ffff-ffff-ffffffffffff", &(row.get(UUID, 3)));
 }
 
 test "bind: text" {
@@ -355,7 +355,7 @@ test "bind: text" {
 		var rows = try conn.query("select $1", .{"hello world"});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("hello world", row.get([]u8, 0).?);
+		try t.expectEqualStrings("hello world", row.get([]u8, 0));
 	}
 
 	{
@@ -367,7 +367,7 @@ test "bind: text" {
 		var rows = try conn.query("select $1::varchar", .{list.items[0]});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("i love keemun", row.get([]const u8, 0).?);
+		try t.expectEqualStrings("i love keemun", row.get([]const u8, 0));
 	}
 
 	{
@@ -376,7 +376,7 @@ test "bind: text" {
 		defer rows.deinit();
 
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings(&[_]u8{0, 1, 2}, row.get([]const u8, 0).?);
+		try t.expectEqualStrings(&[_]u8{0, 1, 2}, row.get([]const u8, 0));
 	}
 
 	{
@@ -388,7 +388,7 @@ test "bind: text" {
 		var rows = try conn.query("select $1::blob", .{list.items[0]});
 		defer rows.deinit();
 		const row = (try rows.next()).?;
-		try t.expectEqualStrings("i love keemun2", row.get([]const u8, 0).?);
+		try t.expectEqualStrings("i love keemun2", row.get([]const u8, 0));
 	}
 }
 
@@ -407,11 +407,11 @@ test "bind: date/time" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(date, row.get(Date, 0).?);
-	try t.expectEqual(time, row.get(Time, 1).?);
-	try t.expectEqual(751203002000000, row.get(i64, 2).?);
-	try t.expectEqual(interval, row.get(Interval, 3).?);
-	try t.expectEqual(Interval{.months = 0, .days = 9298392, .micros = 0}, row.get(Interval, 4).?);
+	try t.expectEqual(date, row.get(Date, 0));
+	try t.expectEqual(time, row.get(Time, 1));
+	try t.expectEqual(751203002000000, row.get(i64, 2));
+	try t.expectEqual(interval, row.get(Interval, 3));
+	try t.expectEqual(Interval{.months = 0, .days = 9298392, .micros = 0}, row.get(Interval, 4));
 }
 
 test "bind: enum" {
@@ -427,9 +427,9 @@ test "bind: enum" {
 	var rows = try conn.query("select $1::my_type, $2::tea_type, $3::my_type", .{"type_a", "keemun", null});
 	defer rows.deinit();
 	const row = (try rows.next()).?;
-	try t.expectEqualStrings("type_a", (try row.getEnum(0)).?);
-	try t.expectEqualStrings("keemun", (try row.getEnum(1)).?);
-	try t.expectEqual(null, try row.getEnum(2));
+	try t.expectEqualStrings("type_a", std.mem.span(row.get(lib.Enum, 0).raw()));
+	try t.expectEqualStrings("keemun", try row.get(?lib.Enum, 1).?.rowCache());
+	try t.expectEqual(null, row.get(?lib.Enum, 2));
 }
 
 test "bind: bistring" {
@@ -454,9 +454,9 @@ test "bind: bistring" {
 
 	// check that our toString is the same as duckdb's
 	while (try rows.next()) |row| {
-		const converted = try @import("zuckdb.zig").bitToString(t.allocator, row.get([]u8, 0).?);
+		const converted = try @import("zuckdb.zig").bitToString(t.allocator, row.get([]u8, 0));
 		defer t.allocator.free(converted);
-		try t.expectEqualStrings(row.get([]u8, 1).?, converted);
+		try t.expectEqualStrings(row.get([]u8, 1), converted);
 	}
 }
 
@@ -477,9 +477,9 @@ test "bind: dynamic" {
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
-	try t.expectEqual(null, row.get(i32, 0));
-	try t.expectEqualStrings("over", row.get([]u8, 1).?);
-	try t.expectEqual(9000, row.get(i16, 2).?);
+	try t.expectEqual(null, row.get(?i32, 0));
+	try t.expectEqualStrings("over", row.get([]u8, 1));
+	try t.expectEqual(9000, row.get(i16, 2));
 }
 
 test "query parameters" {

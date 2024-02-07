@@ -1,6 +1,7 @@
 pub const c = @cImport(@cInclude("duckdb.h"));
 pub const DB = @import("db.zig").DB;
 pub const Row = @import("row.zig").Row;
+pub const Enum = @import("row.zig").Enum;
 pub const Rows = @import("rows.zig").Rows;
 pub const Pool = @import("pool.zig").Pool;
 pub const Stmt = @import("stmt.zig").Stmt;
@@ -146,5 +147,23 @@ fn isStringArray(comptime T: type) bool {
 	switch (@typeInfo(T)) {
 		.Array => |arr| return arr.child == u8,
 		else => return false,
+	}
+}
+
+
+const root = @import("root");
+const _assert = blk: {
+	if (@hasDecl(root, "zuckdb_assert")) {
+		break :blk root.pg_assert;
+	}
+	switch (@import("builtin").mode) {
+		.ReleaseFast, .ReleaseSmall => break :blk false,
+		else => break: blk true,
+	}
+};
+
+pub fn assert(ok: bool) void {
+	if (comptime _assert) {
+		std.debug.assert(ok);
 	}
 }
