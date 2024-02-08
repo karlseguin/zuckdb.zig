@@ -1,12 +1,17 @@
 pub const c = @cImport(@cInclude("duckdb.h"));
+
+const row = @import("row.zig");
+pub const Row = row.Row;
+pub const List = row.List;
+pub const Enum = row.Enum;
+pub const LazyList = row.LazyList;
+pub const OwningRow = row.OwningRow;
+
 pub const DB = @import("db.zig").DB;
-pub const Row = @import("row.zig").Row;
-pub const Enum = @import("row.zig").Enum;
 pub const Rows = @import("rows.zig").Rows;
 pub const Pool = @import("pool.zig").Pool;
 pub const Stmt = @import("stmt.zig").Stmt;
 pub const Conn = @import("conn.zig").Conn;
-pub const OwningRow = @import("row.zig").OwningRow;
 pub const ColumnData = @import("column_data.zig").ColumnData;
 
 pub const Date = c.duckdb_date_struct;

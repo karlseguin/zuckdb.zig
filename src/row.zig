@@ -47,11 +47,26 @@ pub const Row = struct {
 
 		const vc = column.data.container.list;
 		const entry = vc.entries[index];
-		return List(T).init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
+		return List(T).init(col, vc.child, vc.validity, entry.offset, entry.length);
+	}
+
+	pub fn lazyList(self: Row, col: usize) ?LazyList {
+		const index = self.index;
+		const column = self.columns[col];
+		if (_isNull(column.validity, index)) return null;
+
+		const vc = column.data.container.list;
+		const entry = vc.entries[index];
+		return LazyList.init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
+	}
+
+	pub fn listItemType(self: Row, col: usize) ParameterType {
+		// (⌐■_■)
+		return self.columns[col].data.container.list.type;
 	}
 
 	pub fn isNull(self: Row, col: usize) bool {
-		return _isNull( self.columns[col].validity, self.index);
+		return _isNull(self.columns[col].validity, self.index);
 	}
 };
 
@@ -104,17 +119,15 @@ pub fn List(comptime T: type) type {
 	return struct {
 		len: usize,
 		col: usize,
-		type: ParameterType,
 		_validity: [*c]u64,
 		_offset: usize,
 		_scalar: ColumnData.Scalar,
 
 		const Self = @This();
 
-		fn init(col: usize, child_type: ParameterType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
+		fn init(col: usize, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
 			return .{
 				.col = col,
-				.type = child_type,
 				.len = length,
 				._offset = offset,
 				._scalar = scalar,
@@ -153,6 +166,47 @@ pub fn List(comptime T: type) type {
 		}
 	};
 }
+
+// A list who's type isn't known at compile-time
+pub const LazyList = struct {
+	len: usize,
+	col: usize,
+	type: ParameterType,
+	_validity: [*c]u64,
+	_offset: usize,
+	_scalar: ColumnData.Scalar,
+
+	fn init(col: usize, parameter_type: ParameterType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) LazyList {
+		return .{
+			.col = col,
+			.len = length,
+			.type = parameter_type,
+			._offset = offset,
+			._scalar = scalar,
+			._validity = validity,
+		};
+	}
+
+	pub fn get(self: *const LazyList, comptime T: type, i: usize) T {
+		const index = i + self._offset;
+
+		const TT = switch (@typeInfo(T)) {
+			.Optional => |opt| blk: {
+				if (_isNull(self._validity, index)) return null;
+				break :blk opt.child;
+			},
+			else => blk: {
+				lib.assert(_isNull(self._validity, index) == false);
+				break :blk T;
+			},
+		};
+		return getScalar(TT, self._scalar, index, self.col);
+	}
+
+	pub fn isNull(self: *const LazyList, i: usize) bool {
+		return _isNull(self._validity, i);
+	}
+};
 
 inline fn _isNull(validity: [*c]u64, index: usize) bool {
 	const entry_index = index / 64;
@@ -581,10 +635,22 @@ test "read list" {
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.list(?[]u8, 0).?;
 		try t.expectEqual(3, list.len);
-		try t.expectEqual(.varchar, list.type);
 		try t.expectEqualStrings("tag1", list.get(0).?);
 		try t.expectEqual(null, list.get(1));
 		try t.expectEqualStrings("tag2", list.get(2).?);
+	}
+
+{
+		var rows = try conn.query("select ['tag1', null, 'tag2']::varchar[]", .{});
+		defer rows.deinit();
+
+		var row = (try rows.next()) orelse unreachable;
+		const list = row.lazyList(0).?;
+		try t.expectEqual(.varchar, list.type);
+		try t.expectEqual(3, list.len);
+		try t.expectEqualStrings("tag1", list.get([]const u8, 0));
+		try t.expectEqual(null, list.get(?[]const u8, 1));
+		try t.expectEqualStrings("tag2", list.get(?[]const u8, 2).?);
 	}
 
 	{
@@ -605,6 +671,7 @@ test "read list" {
 
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.list(?Enum, 0).?;
+		try t.expectEqual(.@"enum", row.listItemType(0));
 		try t.expectEqual(4, list.len);
 		try t.expectEqualStrings("type_a", try list.get(0).?.rowCache());
 		try t.expectEqual(null, list.get(1));

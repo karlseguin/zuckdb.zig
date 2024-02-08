@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Pool = struct {
 	db: DB,
-	conns: []Conn,
+	conns: []*Conn,
 	shutdown: bool,
 	available: usize,
 	mutex: std.Thread.Mutex,
@@ -25,7 +25,7 @@ pub const Pool = struct {
 		const size = config.size;
 		const allocator = db.allocator;
 
-		const conns = try allocator.alloc(Conn, size);
+		const conns = try allocator.alloc(*Conn, size);
 		errdefer allocator.free(conns);
 
 		// if something fails while we're setting up the pool, we need to close
@@ -34,23 +34,27 @@ pub const Pool = struct {
 		errdefer {
 			for (0..initialized) |i| {
 				conns[i].deinit();
+				allocator.destroy(conns[i]);
 			}
 		}
 
 		const on_connection = config.on_connection;
 
 		for (0..size) |i| {
-			conns[i] = try db.conn();
+			conns[i] = try allocator.create(Conn);
+			errdefer allocator.destroy(conns[i]);
+
+			conns[i].* = try db.conn();
 			initialized += 1;
 
 			if (i == 0) {
 				if (config.on_first_connection) |f| {
-					try f(&conns[i]);
+					try f(conns[i]);
 				}
  			}
 
 			if (on_connection) |f| {
-				try f(&conns[i]);
+				try f(conns[i]);
 			}
 		}
 
@@ -86,14 +90,15 @@ pub const Pool = struct {
 		self.mutex.unlock();
 
 		const allocator = self.allocator;
-		for (conns) |*conn| {
+		for (conns) |conn| {
 			conn.deinit();
+			allocator.destroy(conn);
 		}
 		allocator.free(self.conns);
 		self.db.deinit();
 	}
 
-	pub fn acquire(self: *Pool) !Conn {
+	pub fn acquire(self: *Pool) !*Conn {
 		const conns = self.conns;
 
 		self.mutex.lock();
@@ -107,17 +112,20 @@ pub const Pool = struct {
 				continue;
 			}
 			const index = available - 1;
-			var conn = conns[index];
+			const conn = conns[index];
 			self.available = index;
 			self.mutex.unlock();
 
-			conn.err = null;
 			return conn;
 		}
 	}
 
-	pub fn release(self: *Pool, conn: Conn) void {
+	pub fn release(self: *Pool, conn: *Conn) void {
 		var conns = self.conns;
+		if (conn.err) |err| {
+			conn.allocator.free(err);
+			conn.err = null;
+		}
 
 		self.mutex.lock();
 		const available = self.available;

@@ -3,11 +3,13 @@ const lib = @import("lib.zig");
 
 pub const DB = lib.DB;
 pub const Row = lib.Row;
+pub const List = lib.List;
+pub const Enum = lib.Enum;
 pub const Rows = lib.Rows;
 pub const Conn = lib.Conn;
 pub const Pool = lib.Pool;
 pub const Stmt = lib.Stmt;
-pub const Enum = lib.Enum;
+pub const LazyList = lib.LazyList;
 pub const OwningRow = lib.OwningRow;
 
 pub const UUID = lib.UUID;
