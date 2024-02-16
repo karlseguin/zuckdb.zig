@@ -1,6 +1,6 @@
-Zig driver for DuckDB.
+# Zig driver for DuckDB.
 
-# Quick Example
+## Quick Example
 ```zig
 const db = try zuckdb.DB.init(allocator, "/tmp/db.duck", .{});
 defer db.deinit();
@@ -26,6 +26,8 @@ while (try rows.next()) |row| {
 Any non-primitive value that you get from the `row` are valid only until the next call to `next` or `deinit`.
 
 ## Install
+This library is tested with DuckDB 0.10.0.
+
 1) Add into `dependencies` at `build.zig.zon`:
 ```zig
 .dependencies = .{
@@ -37,7 +39,7 @@ Any non-primitive value that you get from the `row` are valid only until the nex
 },
 ```
 
-2) Download the libduckdb from the <a href="https://duckdb.org/docs/archive/0.9.2/installation/?version=latest&environment=cplusplus&installer=binary">DuckDB download page</a>. 
+2) Download the libduckdb from the <a href="https://duckdb.org/docs/installation/index.html?version=latest&environment=cplusplus&installer=binary">DuckDB download page</a>. 
 
 3) Place the `duckdb.h` file and the `libduckdb.so` (linux) or `libduckdb.dylib` (mac) in your project's `lib` folder.
 

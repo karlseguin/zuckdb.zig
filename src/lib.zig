@@ -37,6 +37,7 @@ pub const ParameterType = enum {
 	time,
 	interval,
 	i128,
+	u128,
 	varchar,
 	blob,
 	decimal,
@@ -67,13 +68,14 @@ pub const ParameterType = enum {
 			14 => .time,
 			15 => .interval,
 			16 => .i128,
-			17 => .varchar,
-			18 => .blob,
-			19 => .decimal,
-			23 => .@"enum",
-			24 => .list,
-			27 => .uuid,
-			29 => .bitstring,
+			17 => .u128,
+			18 => .varchar,
+			19 => .blob,
+			20 => .decimal,
+			24 => .@"enum",
+			25 => .list,
+			28 => .uuid,
+			30 => .bitstring,
 			else => .unknown
 		};
 	}
@@ -83,6 +85,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub fn hugeInt(value: i128) c.duckdb_hugeint {
+	return .{
+		.lower = @intCast(@mod(value, 18446744073709551616)),
+		.upper = @intCast(@divFloor(value, 18446744073709551616)),
+	};
+}
+
+pub fn uhugeInt(value: u128) c.duckdb_uhugeint {
 	return .{
 		.lower = @intCast(@mod(value, 18446744073709551616)),
 		.upper = @intCast(@divFloor(value, 18446744073709551616)),

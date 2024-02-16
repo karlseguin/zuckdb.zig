@@ -98,7 +98,7 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 					9...16 => rc = c.duckdb_bind_uint16(stmt, bind_index, @intCast(value)),
 					17...32 => rc = c.duckdb_bind_uint32(stmt, bind_index, @intCast(value)),
 					33...64 => rc = c.duckdb_bind_uint64(stmt, bind_index, @intCast(value)),
-					// duckdb doesn't support u128
+					65...128 => rc = c.duckdb_bind_uhugeint(stmt, bind_index, lib.uhugeInt(@intCast(value))),
 					else => bindError(T),
 				}
 			}
@@ -214,13 +214,14 @@ test "bind: int" {
 	defer conn.deinit();
 
 	{
-		var rows = try conn.query("select $1, $2, $3, $4, $5, $6::hugeint", .{
+		var rows = try conn.query("select $1, $2, $3, $4, $5, $6::hugeint, $7::uhugeint", .{
 			99,
 			@as(i8, 2),
 			@as(i16, 3),
 			@as(i32, 4),
 			@as(i64, 5),
-			@as(i128, -9955340232221457974987)
+			@as(i128, -9955340232221457974987),
+			@as(u128, 1267650600228229401496703205376),
 		});
 		defer rows.deinit();
 
@@ -231,6 +232,7 @@ test "bind: int" {
 		try t.expectEqual(4, row.get(i32, 3));
 		try t.expectEqual(5, row.get(i64, 4));
 		try t.expectEqual(-9955340232221457974987, row.get(i128, 5));
+		try t.expectEqual(1267650600228229401496703205376, row.get(u128, 6));
 	}
 
 	{
@@ -532,7 +534,7 @@ test "query parameters" {
 	try t.expectEqual(ParameterType.f32, stmt.parameterType(10));
 	try t.expectEqual(11, stmt.parameterTypeC(11));
 	try t.expectEqual(ParameterType.f64, stmt.parameterType(11));
-	try t.expectEqual(19, stmt.parameterTypeC(12));
+	try t.expectEqual(20, stmt.parameterTypeC(12));
 	try t.expectEqual(ParameterType.decimal, stmt.parameterType(12));
 
 	// time
@@ -546,8 +548,8 @@ test "query parameters" {
 	try t.expectEqual(ParameterType.interval, stmt.parameterType(16));
 
 	// varchar & blob
-	try t.expectEqual(17, stmt.parameterTypeC(17));
+	try t.expectEqual(18, stmt.parameterTypeC(17));
 	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
-	try t.expectEqual(18, stmt.parameterTypeC(18));
+	try t.expectEqual(19, stmt.parameterTypeC(18));
 	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
 }

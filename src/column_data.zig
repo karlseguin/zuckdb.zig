@@ -23,6 +23,7 @@ pub const ColumnData = struct {
 		i32: [*c]i32,
 		i64: [*c]i64,
 		i128: [*c]i128,
+		u128: [*c]u128,
 		u8: [*c]u8,
 		u16: [*c]u16,
 		u32: [*c]u32,

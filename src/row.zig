@@ -226,6 +226,7 @@ fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize, col: usi
 			else => unreachable,
 		},
 		i128 => return scalar.i128[index],
+		u128 => return scalar.u128[index],
 		u8 => return scalar.u8[index],
 		u16 => return scalar.u16[index],
 		u32 => return scalar.u32[index],
