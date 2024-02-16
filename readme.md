@@ -129,7 +129,7 @@ defer pool.release(conn);
 # Conn
 
 ## query
-Use `conn.query(sql, args)` to query the database and return a `zuckdb.Rows` which can be iterated. You must call `deinit` on the returned rows.
+Use `conn.query(sql, args) !Rows` to query the database and return a `zuckdb.Rows` which can be iterated. You must call `deinit` on the returned rows.
 
 ```zig
 var rows = try conn.query("select * from users where power > $1", .{9000});
@@ -140,10 +140,10 @@ while (try rows.next()) |row| {
 ```
 
 ## exec
-`conn.exec(sql, args)` is a wrapper around `query` which returns the number of affected rows for insert, updates or deletes.
+`conn.exec(sql, args) !usize` is a wrapper around `query` which returns the number of affected rows for insert, updates or deletes.
 
 ## row
-`conn.row(sql, args)` is a wrapper around `query` which returns a single optional row. You must call `deinit` on the returned row:
+`conn.row(sql, args) !?OwningRow` is a wrapper around `query` which returns a single optional row. You must call `deinit` on the returned row:
 
 ```zig
 var row = (try conn.query("select * from users where id = $1", .{22})) orelse return null;;
@@ -153,6 +153,9 @@ defer row.deinit();
 
 ## begin/commit/rollback
 The `conn.begin()`, `conn.commit()` and `conn.rollback()` calls are wrappers around `exec`, e.g.: `conn.exec("begin", .{})`.
+
+## prepare
+`conn.prepare(sql) !Stmt` prepares the given SQL and returns a `zuckdb.Stmt`. You should prefer using `query`, `exec` or `row` which wrap `prepare` and then call `stmt.bind(values)` and finally `stmt.execute()`.
 
 ## err
 If a method of `conn` returns `error.DuckDBError`, `conn.err` will be set:

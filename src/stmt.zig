@@ -1,6 +1,8 @@
 const std = @import("std");
 const lib = @import("lib.zig");
 
+const M = @This();
+
 const c = lib.c;
 const Conn = lib.Conn;
 const Rows = lib.Rows;
@@ -40,12 +42,12 @@ pub const Stmt = struct {
 	pub fn bind(self: Stmt, values: anytype) !void {
 		const stmt = self.stmt.*;
 		inline for (values, 0..) |value, i| {
-			_ = try bindValue(@TypeOf(value), stmt, value, i + 1);
+			_ = try M.bindValue(@TypeOf(value), stmt, value, i + 1);
 		}
 	}
 
-	pub fn bindDynamic(self: Stmt, i: usize, value: anytype) !void {
-		_ = try bindValue(@TypeOf(value), self.stmt.*, value, i+1);
+	pub fn bindValue(self: Stmt, i: usize, value: anytype) !void {
+		_ = try M.bindValue(@TypeOf(value), self.stmt.*, value, i+1);
 	}
 
 	pub fn execute(self: *Stmt, state: anytype) !Rows {
@@ -471,9 +473,9 @@ test "bind: dynamic" {
 
 	var stmt = try conn.prepare("select $1::int, $2::varchar, $3::smallint", .{});
 	defer stmt.deinit();
-	try stmt.bindDynamic(0, null);
-	try stmt.bindDynamic(1, "over");
-	try stmt.bindDynamic(2, 9000);
+	try stmt.bindValue(0, null);
+	try stmt.bindValue(1, "over");
+	try stmt.bindValue(2, 9000);
 
 	var rows = try stmt.execute(null);
 	defer rows.deinit();
