@@ -282,7 +282,7 @@ fn getBlob(scalar: ColumnData.Scalar, index: usize) []u8 {
 			const pointer = value.value.pointer;
 			return pointer.ptr[0..len];
 		},
-	else => unreachable,
+		else => unreachable,
 	}
 }
 

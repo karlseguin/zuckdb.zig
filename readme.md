@@ -12,7 +12,6 @@ defer conn.deinit();
 // returns 0 for other statements
 _ = try conn.exec("create table users(id int)", .{});
 
-
 const rows = try conn.query("select * from users", .{});
 defer rows.deinit();
 
@@ -72,8 +71,24 @@ exe.addLibraryPath(LazyPath.relative("lib/"));
 // add other imports
 ```
 
+### Static Linking
+It's also possible to statically link DuckDB. 
+
+* Clone the [DuckDB repo](https://github.com/duckdb/duckdb) and checkout the `v0.10.0` branch. 
+* Build `DuckDB` using the `bundle-library` make target.
+* Copy `build/release/libduckdb_bundle.a` to your project's `lib` directory
+* Rename the file to `libduckdb.a`
+* Copy `src/include/duckdb.h` from the DuckDB repo to your project's `lib` directory
+* Add the following to your `build.zig`:
+
+```zig
+exe.linkSystemLibrary("duckdb");
+exe.linkSystemLibrary("stdc++");
+exe.addLibraryPath(LazyPath.relative("lib/"));
+```
+
 # DB
-The `DB` is used to intialize the database, open connections and, optionally, create a connection pool.
+The `DB` is used to initialize the database, open connections and, optionally, create a connection pool.
 
 ## init
 Creates or opens the database.
@@ -116,10 +131,12 @@ defer conn.deinit();
 ```
 
 ## pool
-Initializes a pool of connections to the DB.
+Initializes a pool of connections to the DB. 
 
 ```zig
-var pool = db.pool(.{.size = 2});
+var pool = try db.pool(.{.size = 2});
+
+// the pool owns the `db`, so pool.deinit will call `db.deinit`.
 defer pool.deinit();
 
 var conn = try pool.acquire();
@@ -187,7 +204,7 @@ The most important method on `rows` is `next()` which is used to iterate the res
 # Row
 
 ## get
-`Row` exposes a `get(T, index) T` function. This function trusts you! If you ask for an <code>i32</code> the library will crash if the column is not an <code>int4</code>. Similarl, if the value can be null, you must use the optional type, e.g. <code>?i32</code>.
+`Row` exposes a `get(T, index) T` function. This function trusts you! If you ask for an <code>i32</code> the library will crash if the column is not an <code>int4</code>. Similarly, if the value can be null, you must use the optional type, e.g. <code>?i32</code>.
 
 The supported types for `get`, are:
 * `[]u8`, 
@@ -212,7 +229,7 @@ The supported types for `get`, are:
 
 Optional version of the above are all supported **and must be used** if it's possible the value is null.
 
-String values and enums are only valid until the next call to `next()` or `deinit`. You must dupe the values if you want them to outlive the row.s
+String values and enums are only valid until the next call to `next()` or `deinit`. You must dupe the values if you want them to outlive the row.
 
 ## list
 `Row` exposes a `list` method which behaves similar to `get` but returns a `zuckdb.List(T)`.
@@ -230,7 +247,7 @@ try t.expectEqual(null, list.get(3));
 try t.expectEqual(-4, list.get(4).?);
 ```
 
-`list()` always returns a nullable, i.e. `?zuckdb.List(T)`. Besides the `len` field, `get` is used on the provided list to return a value at a specific index. `row.list(T, col).get(idz)` works with any of the types supported by `row.get(col)`.
+`list()` always returns a nullable, i.e. `?zuckdb.List(T)`. Besides the `len` field, `get` is used on the provided list to return a value at a specific index. `row.list(T, col).get(idx)` works with any of the types supported by `row.get(col)`.
 
 a `List(T)` also has a `alloc(allocator: Allocator) ![]T` method. This will allocate a `[]T` and fill it with the list values. It is the caller's responsibility to free the returned slice.
 
@@ -239,9 +256,9 @@ Alternatively, `fill(into: []T) void` can be used used to populate `into` with i
 # zuckdb.Enum
 The `zuckdb.Enum` is a special type which exposes two functions: `raw() [*c]const u8` and `rowCache() ![]const u8`.
 
-`raw()` returns a C string directly to the DuckDB enum string value. If you want to turn this into a `[]const u8`, you'll need to wrap it in `std.mem.span`. The value returned `raw` is only valid untli the next iteration.
+`raw()` directly returns the DuckDB enum string value. If you want to turn this into a `[]const u8`, you'll need to wrap it in `std.mem.span`. The value returned by `raw()` is only valid until the next iteration.
 
-`rowCache()` takes the result of `raw()`, and dupes it, giving ownerning to the Rows. Thus, the string returned by `rowCache()` outlives the current row iteration and is valid until `rows.deinit()` is called. Essentially, it is an interned string representation fo the enum value (which DuckDB internally represents as an integer).
+`rowCache()` takes the result of `raw()`, and dupes it, giving ownership to the Rows. Thus, the string returned by `rowCache()` outlives the current row iteration and is valid until `rows.deinit()` is called. Essentially, it is an interned string representation of the enum value (which DuckDB internally represents as an integer).
 
 
 ## Pool
@@ -260,7 +277,7 @@ var conn = try pool.acquire();
 defer pool.release(conn);
 ```
 
-The Pool takes ownership of the DB object, thus `db.deinit` does not need to be called.The `on_connection` and `on_first_connection` are optional callbacks. They both have the same signature:
+The Pool takes ownership of the DB object, thus `db.deinit` does not need to be called The `on_connection` and `on_first_connection` are optional callbacks. They both have the same signature:
 
 ```zig
 ?*const fn(conn: *Conn) anyerror!void
@@ -277,4 +294,4 @@ var rows = try conn.queryWithState(SQL, .{ARGS}, &state);
 // use rows normally
 ```
 
-The value passed to `zuckdb.StaticState` is the number of columns returned by the query. The `state` must remain valid while the query is used.
+The value passed to `zuckdb.StaticState` is the number of columns returned by the query. The `state` must remain valid until `rows.deinit()` is called.
