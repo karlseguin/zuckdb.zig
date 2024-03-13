@@ -5,6 +5,7 @@ const c = lib.c;
 const DB = lib.DB;
 const Row = lib.Row;
 const Rows = lib.Rows;
+const Pool = lib.Pool;
 const Stmt = lib.Stmt;
 const OwningRow = lib.OwningRow;
 
@@ -12,6 +13,7 @@ const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
 pub const Conn = struct {
+	pool: ?*Pool = null,
 	err: ?[]const u8,
 	allocator: Allocator,
 	conn: *c.duckdb_connection,
@@ -33,7 +35,7 @@ pub const Conn = struct {
 		};
 	}
 
-	pub fn deinit(self: Conn) void {
+	pub fn deinit(self: *const Conn) void {
 		const allocator = self.allocator;
 
 		if (self.err) |e| {
@@ -43,6 +45,12 @@ pub const Conn = struct {
 		const conn = self.conn;
 		c.duckdb_disconnect(conn);
 		allocator.destroy(conn);
+	}
+
+	pub fn release(self: *Conn) void {
+		if (self.pool) |p| {
+			p.release(self);
+		}
 	}
 
 	pub fn begin(self: *Conn) !void {

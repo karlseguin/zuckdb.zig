@@ -21,9 +21,12 @@ pub const Pool = struct {
 		on_first_connection: ?*const fn(conn: *Conn) anyerror!void = null,
 	};
 
-	pub fn init(db: DB, config: Config) !Pool {
+	pub fn init(db: DB, config: Config) !*Pool {
 		const size = config.size;
 		const allocator = db.allocator;
+
+		const pool = try allocator.create(Pool);
+		errdefer allocator.destroy(pool);
 
 		const conns = try allocator.alloc(*Conn, size);
 		errdefer allocator.free(conns);
@@ -41,24 +44,26 @@ pub const Pool = struct {
 		const on_connection = config.on_connection;
 
 		for (0..size) |i| {
-			conns[i] = try allocator.create(Conn);
-			errdefer allocator.destroy(conns[i]);
+			const conn = try allocator.create(Conn);
+			errdefer allocator.destroy(conn);
 
-			conns[i].* = try db.conn();
+			conn.* = try db.conn();
+			conns[i] = conn;
+			conn.pool = pool;
 			initialized += 1;
 
 			if (i == 0) {
 				if (config.on_first_connection) |f| {
-					try f(conns[i]);
+					try f(conn);
 				}
  			}
 
 			if (on_connection) |f| {
-				try f(conns[i]);
+				try f(conn);
 			}
 		}
 
-		return .{
+		pool.* = .{
 			.db = db,
 			.cond = .{},
 			.mutex = .{},
@@ -67,6 +72,7 @@ pub const Pool = struct {
 			.available = size,
 			.allocator = allocator,
 		};
+		return pool;
 	}
 
 	// blocks until all connections can be safely removed from the pool
@@ -96,6 +102,8 @@ pub const Pool = struct {
 		}
 		allocator.free(self.conns);
 		self.db.deinit();
+
+		allocator.destroy(self);
 	}
 
 	pub fn acquire(self: *Pool) !*Conn {
@@ -146,9 +154,9 @@ test "Pool" {
 	});
 	defer pool.deinit();
 
-	const t1 = try std.Thread.spawn(.{}, testPool, .{&pool});
-	const t2 = try std.Thread.spawn(.{}, testPool, .{&pool});
-	const t3 = try std.Thread.spawn(.{}, testPool, .{&pool});
+	const t1 = try std.Thread.spawn(.{}, testPool, .{pool});
+	const t2 = try std.Thread.spawn(.{}, testPool, .{pool});
+	const t3 = try std.Thread.spawn(.{}, testPool, .{pool});
 
 	t1.join(); t2.join(); t3.join();
 
@@ -163,7 +171,7 @@ fn testPool(p: *Pool) void {
 	for (0..2000) |i| {
 		var conn = p.acquire() catch unreachable;
 		_ = conn.exec("insert into pool_test (id) values ($1)", .{i}) catch unreachable;
-		p.release(conn);
+		conn.release();
 	}
 }
 

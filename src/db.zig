@@ -83,7 +83,7 @@ pub const DB = struct{
 		return Conn.open(self);
 	}
 
-	pub fn pool(self: DB, config: Pool.Config) !Pool {
+	pub fn pool(self: DB, config: Pool.Config) !*Pool {
 		return Pool.init(self, config);
 	}
 };

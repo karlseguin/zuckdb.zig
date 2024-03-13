@@ -190,6 +190,9 @@ const rows = conn.query("....", .{}) catch |err| {
 
 In the above snippet, it's possible to skip the `if (err == error.DuckDBError)`check, but in that case conn.err could be set from some previous command (conn.err is always reset when acquired from the pool).
 
+## release
+`conn.release()` will release the connection back to the pool. This does nothing if the connection did not come from the pool (i.e. `pool.acquire()`). This is the same as calling `pool.release(conn)`.
+
 # Rows
 The `rows` returned from `conn.query` exposes the following methods:
 
