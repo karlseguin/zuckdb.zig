@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Pool = struct {
 	db: DB,
+	timeout: u64,
 	conns: []*Conn,
 	shutdown: bool,
 	available: usize,
@@ -17,6 +18,7 @@ pub const Pool = struct {
 
 	pub const Config = struct {
 		size: usize = 5,
+		timeout: u32 = 10 * std.time.ms_per_s,
 		on_connection: ?*const fn(conn: *Conn) anyerror!void = null,
 		on_first_connection: ?*const fn(conn: *Conn) anyerror!void = null,
 	};
@@ -71,6 +73,7 @@ pub const Pool = struct {
 			.shutdown = false,
 			.available = size,
 			.allocator = allocator,
+			.timeout = @as(u64, @intCast(config.timeout)) * std.time.ns_per_ms,
 		};
 		return pool;
 	}
@@ -116,7 +119,7 @@ pub const Pool = struct {
 			}
 			const available = self.available;
 			if (available == 0) {
-				self.cond.wait(&self.mutex);
+				try self.cond.timedWait(&self.mutex, self.timeout);
 				continue;
 			}
 			const index = available - 1;

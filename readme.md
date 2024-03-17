@@ -122,7 +122,7 @@ const db = DB.initWithErr(allocator, "/does/not/exist", .{}, &open_err) catch |e
 Closes the database.
 
 ## conn
-Returns a new connection object. 
+Returns a new [connection](#conn-1) object. 
 
 ```zig
 var conn = try db.conn();
@@ -131,7 +131,7 @@ defer conn.deinit();
 ```
 
 ## pool
-Initializes a pool of connections to the DB. 
+Initializes a [pool](#pool-1) of connections to the DB. 
 
 ```zig
 var pool = try db.pool(.{.size = 2});
@@ -142,6 +142,13 @@ defer pool.deinit();
 var conn = try pool.acquire();
 defer pool.release(conn);
 ```
+
+The `pool` method takes an options parameter:
+* `size: usize` - The number of connections to keep in the pool. Defaults to `5`
+* `timeout: u64` - The time, in milliseconds, to wait for a connetion to be available when calling `pool.acquire()`. Defaults to `10_000`.
+* `on_connection: ?*const fn(conn: *Conn) anyerror!void` - The function to call when the pool first establishes the connection. Defaults to `null`.
+* `on_first_connection: ?*const fn(conn: *Conn) anyerror!void` - The function to call on the first connection opened by the pool. Defaults to `null`.
+
 
 # Conn
 

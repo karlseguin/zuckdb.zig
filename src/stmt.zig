@@ -115,18 +115,24 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 		.Bool => rc = c.duckdb_bind_boolean(stmt, bind_index, value),
 		.Pointer => |ptr| {
 			switch (ptr.size) {
-				.One => rc = try bindValue(ptr.child, stmt, value, bind_index),
-				.Slice => switch (ptr.child) {
-					u8 => rc = bindByteArray(stmt, bind_index, value.ptr, value.len),
+				.Slice => {
+					if (ptr.is_const) {
+						rc = bindSlice(stmt, bind_index, @as([]const ptr.child, value));
+					} else {
+						rc = bindSlice(stmt, bind_index, @as([]ptr.child, value));
+					}
+				},
+				.One => switch (@typeInfo(ptr.child)) {
+					.Array => {
+						const Slice = []const std.meta.Elem(ptr.child);
+						rc = bindSlice(stmt, bind_index, @as(Slice, value));
+					},
 					else => bindError(T),
 				},
 				else => bindError(T),
 			}
 		},
-		.Array => |arr| switch (arr.child) {
-			u8 => rc = bindByteArray(stmt, bind_index, value, value.len),
-			else => bindError(T),
-		},
+		.Array => rc = try bindValue(@TypeOf(&value), stmt, &value, bind_index),
 		.Optional => |opt| {
 			if (value) |v| {
 				rc = try bindValue(opt.child, stmt, v, bind_index);
@@ -174,6 +180,18 @@ fn bindByteArray(stmt: c.duckdb_prepared_statement, bind_index: usize, value: [*
 		c.DUCKDB_TYPE_INVALID => return c.duckdb_bind_varchar_length(stmt, bind_index, value, len),
 		else => return DuckDBError,
 	}
+}
+
+fn bindSlice(stmt: c.duckdb_prepared_statement, bind_index: usize, value: anytype) c_uint {
+	const T = @TypeOf(value);
+	if (T == []u8 or T == []const u8) {
+		// this slice is just a string, it maps to a duckdb text, not a list
+		return bindByteArray(stmt, bind_index, value.ptr, value.len);
+	}
+
+	// https://github.com/duckdb/duckdb/discussions/7482
+	// DuckDB doesn't expose an API for binding arrays.
+	bindError(T);
 }
 
 fn bindError(comptime T: type) void {
