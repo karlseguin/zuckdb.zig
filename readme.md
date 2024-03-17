@@ -12,7 +12,7 @@ defer conn.deinit();
 // returns 0 for other statements
 _ = try conn.exec("create table users(id int)", .{});
 
-const rows = try conn.query("select * from users", .{});
+var rows = try conn.query("select * from users", .{});
 defer rows.deinit();
 
 while (try rows.next()) |row| {
@@ -178,7 +178,7 @@ The `conn.begin()`, `conn.commit()` and `conn.rollback()` calls are wrappers aro
 If a method of `conn` returns `error.DuckDBError`, `conn.err` will be set:
 
 ```zig
-const rows = conn.query("....", .{}) catch |err| {
+var rows = conn.query("....", .{}) catch |err| {
   if (err == error.DuckDBError) {
     if (conn.err) |derr| {
       std.log.err("DuckDB {s}\n", .{derr});
