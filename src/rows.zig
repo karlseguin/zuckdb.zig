@@ -53,9 +53,15 @@ pub const Rows = struct {
 	enum_name_cache: std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)),
 
 	pub fn init(allocator: Allocator, stmt: ?*c.duckdb_prepared_statement, result: *c.duckdb_result, state: anytype) !Rows {
+		errdefer if (stmt) |s| {
+			c.duckdb_destroy_prepare(s);
+			allocator.destroy(s);
+		};
+
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
 		const column_count = c.duckdb_column_count(result);
+
 		if (chunk_count == 0) {
 			// no chunk, we don't need to load everything else
 			return .{

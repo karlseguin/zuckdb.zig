@@ -75,15 +75,26 @@ pub const Conn = struct {
 	}
 
 	pub fn exec(self: *Conn, sql: anytype, values: anytype) !usize {
-		const rows = try self.query(sql, values);
-		defer rows.deinit();
-		return rows.changed();
+		const r = try self.getResult(sql, values);
+		if (r.stmt) |s| {
+			c.duckdb_destroy_prepare(s);
+			self.allocator.destroy(s);
+		}
+		return self.execResult(r.result);
 	}
 
 	pub fn execCache(self: *Conn, name: []const u8, version: u32, sql: anytype, values: anytype) !usize {
-		const rows = try self.queryCache(name, version, sql, values);
-		defer rows.deinit();
-		return rows.changed();
+		var s = try self.getCachedStmt(name, version, sql, values);
+		defer _ = c.duckdb_clear_bindings(s.stmt.*);
+		return self.execResult(try s.getResult());
+	}
+
+	fn execResult(self: *Conn, result: *c.duckdb_result) !usize {
+		defer {
+			c.duckdb_destroy_result(result);
+			self.allocator.destroy(result);
+		}
+		return c.duckdb_rows_changed(result);
 	}
 
 	pub fn query(self: *Conn, sql: anytype, values: anytype) !Rows {
@@ -95,60 +106,13 @@ pub const Conn = struct {
 	}
 
 	pub fn queryWithState(self: *Conn, sql: anytype, values: anytype, state: anytype) !Rows {
-		if (values.len > 0) {
-			var stmt = try self.prepare(sql, .{.auto_release = true});
-			errdefer stmt.deinit();
-			try stmt.bind(values);
-			return stmt.execute(state);
-		}
-
-		const allocator = self.allocator;
-		const str = try lib.stringZ(sql, allocator);
-		defer str.deinit(allocator);
-
-		const result = try allocator.create(c.duckdb_result);
-		errdefer allocator.destroy(result);
-
-		if (c.duckdb_query(self.conn.*, str.z, result) == DuckDBError) {
-			try self.duckdbError(c.duckdb_result_error(result));
-			return error.DuckDBError;
-		}
-		return Rows.init(allocator, null, result, state);
+		const result = try self.getResult(sql, values);
+		return Rows.init(self.allocator, result.stmt, result.result, state);
 	}
 
 	pub fn queryCacheWithState(self: *Conn, name: []const u8, version: u32, sql: anytype, values: anytype, state: anytype) !Rows {
-		var stmt: ?Stmt = null;
-		const gop = try self.query_cache.getOrPut(self.allocator, name);
-		if (gop.found_existing) {
-			const cached = gop.value_ptr;
-			if (cached.version == version) {
-				stmt = cached.stmt;
-			} else {
-				cached.stmt.deinit();
-			}
-		}
-
-		if (stmt == null) {
-			errdefer if (gop.found_existing) {
-				// if we're here, we then we must have called deinit() on the cached statement
-				// but the entry is still in the cache (because we were expecting to replace it)
-				// if we fail, we need to remove it so that subsequent calls don't get the
-				// deinitialize statement.
-				const removed = self.query_cache.fetchRemove(name);
-				self.allocator.free(removed.?.key);
-			};
-
-			stmt = try self.prepare(sql, .{.auto_release = false});
-			if (gop.found_existing == false) {
-				gop.key_ptr.* = try self.allocator.dupe(u8, name);
-			}
-			gop.value_ptr.* = .{.stmt = stmt.?, .version = version};
-		}
-
-		var s = stmt.?;
-		defer _ = c.duckdb_clear_bindings(s.stmt.*);
-		try s.bind(values);
-		return s.execute(state);
+		var stmt = try self.getCachedStmt(name, version, sql, values);
+		return stmt.execute(state);
 	}
 
 	pub fn row(self: *Conn, sql: anytype, values: anytype) !?OwningRow {
@@ -211,6 +175,75 @@ pub const Conn = struct {
 		}
 		self.err = try allocator.dupe(u8, std.mem.span(err));
 	}
+
+	const Result = struct {
+		stmt: ?*c.duckdb_prepared_statement,
+		result: *c.duckdb_result,
+	};
+
+	fn getResult(self: *Conn, sql: anytype, values: anytype) !Result {
+		if (values.len > 0) {
+			var stmt = try self.prepare(sql, .{.auto_release = true});
+			errdefer stmt.deinit();
+			try stmt.bind(values);
+
+			return .{
+				.stmt = stmt.stmt,
+				.result = try stmt.getResult(),
+			};
+		}
+
+		const allocator = self.allocator;
+		const str = try lib.stringZ(sql, allocator);
+		defer str.deinit(allocator);
+
+		const result = try allocator.create(c.duckdb_result);
+		errdefer allocator.destroy(result);
+
+		if (c.duckdb_query(self.conn.*, str.z, result) == DuckDBError) {
+			try self.duckdbError(c.duckdb_result_error(result));
+			return error.DuckDBError;
+		}
+
+		return .{
+			.stmt = null,
+			.result = result,
+		};
+	}
+
+	fn getCachedStmt(self: *Conn, name: []const u8, version: u32, sql: anytype, values: anytype) !Stmt {
+		var stmt: ?Stmt = null;
+		const gop = try self.query_cache.getOrPut(self.allocator, name);
+		if (gop.found_existing) {
+			const cached = gop.value_ptr;
+			if (cached.version == version) {
+				stmt = cached.stmt;
+			} else {
+				cached.stmt.deinit();
+			}
+		}
+
+		if (stmt == null) {
+			errdefer if (gop.found_existing) {
+				// if we're here, we then we must have called deinit() on the cached statement
+				// but the entry is still in the cache (because we were expecting to replace it)
+				// if we fail, we need to remove it so that subsequent calls don't get the
+				// deinitialize statement.
+				const removed = self.query_cache.fetchRemove(name);
+				self.allocator.free(removed.?.key);
+			};
+
+			stmt = try self.prepare(sql, .{.auto_release = false});
+			if (gop.found_existing == false) {
+				gop.key_ptr.* = try self.allocator.dupe(u8, name);
+			}
+			gop.value_ptr.* = .{.stmt = stmt.?, .version = version};
+		}
+
+		var s = stmt.?;
+		try s.bind(values);
+		return s;
+	}
 };
 
 const CachedStmt = struct {
@@ -238,7 +271,7 @@ test "conn: exec success" {
 	defer conn.deinit();
 
 	_ = try conn.exec("create table t (id int)", .{});
-	_ = try conn.exec("insert into t (id) values (39)", .{});
+	try t.expectEqual(1, try conn.exec("insert into t (id) values (39)", .{}));
 
 	var rows = try conn.query("select * from t", .{});
 	defer rows.deinit();
@@ -416,7 +449,7 @@ test "conn: prepare error" {
 	try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", conn.err.?);
 }
 
-test "conn: stmt cache" {
+test "conn: query cache" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
@@ -457,6 +490,30 @@ test "conn: stmt cache" {
 
 	}
 }
+
+test "conn: exec cache" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table t1 (id integer)", .{});
+
+	try t.expectEqual(1, try conn.execCache("q1", 1, "insert into t1 values ($1)", .{2}));
+	try t.expectEqual(1, try conn.execCache("q1", 1, "insert into t1 values ($1)", .{3}));
+	try t.expectEqual(1, try conn.execCache("q1", 2, "insert into t1 values (5)", .{}));
+	try t.expectEqual(1, try conn.execCache("q2", 1, "insert into t1 values (0)", .{}));
+
+	var rows = try conn.query("select * from t1 order by id", .{});
+	defer rows.deinit();
+	try t.expectEqual(0, (try rows.next()).?.get(i32, 0));
+	try t.expectEqual(2, (try rows.next()).?.get(i32, 0));
+	try t.expectEqual(3, (try rows.next()).?.get(i32, 0));
+	try t.expectEqual(5, (try rows.next()).?.get(i32, 0));
+	try t.expectEqual(null, rows.next());
+}
+
 
 fn testSQLStringType(conn: *Conn, sql: anytype) !void {
 	var rows = try conn.query(sql, .{9392, "teg"});

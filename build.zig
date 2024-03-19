@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) !void {
 			.root_source_file = .{ .path = "src/zuckdb.zig" },
 			.target = target,
 			.optimize = optimize,
+			.test_runner = "test_runner.zig",
 		});
 
 		lib_test.addRPath(lib_path);

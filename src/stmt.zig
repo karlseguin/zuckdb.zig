@@ -51,6 +51,11 @@ pub const Stmt = struct {
 	}
 
 	pub fn execute(self: *Stmt, state: anytype) !Rows {
+		const result = try self.getResult();
+		return Rows.init(self.conn.allocator, if (self.auto_release) self.stmt else null, result, state);
+	}
+
+	pub fn getResult(self: *Stmt) !*c.duckdb_result {
 		const conn = self.conn;
 		const allocator = conn.allocator;
 
@@ -61,7 +66,7 @@ pub const Stmt = struct {
 			try self.conn.duckdbError(c.duckdb_result_error(result));
 			return error.DuckDBError;
 		}
-		return Rows.init(allocator, if (self.auto_release) self.stmt else null, result, state);
+		return result;
 	}
 
 	pub fn numberOfParameters(self: Stmt) usize {
