@@ -19,7 +19,7 @@ pub const Conn = struct {
 	conn: *c.duckdb_connection,
 	query_cache: std.StringHashMapUnmanaged(CachedStmt),
 
-	pub fn open(db: DB) !Conn {
+	pub fn open(db: *const DB) !Conn {
 		const allocator = db.allocator;
 
 		const conn = try allocator.create(c.duckdb_connection);
@@ -112,7 +112,7 @@ pub const Conn = struct {
 
 	pub fn queryCacheWithState(self: *Conn, name: []const u8, version: u32, sql: anytype, values: anytype, state: anytype) !Rows {
 		var stmt = try self.getCachedStmt(name, version, sql, values);
-		return stmt.execute(state);
+		return stmt.query(state);
 	}
 
 	pub fn row(self: *Conn, sql: anytype, values: anytype) !?OwningRow {

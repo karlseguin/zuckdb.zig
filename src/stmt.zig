@@ -39,23 +39,38 @@ pub const Stmt = struct {
 		self.conn.allocator.destroy(stmt);
 	}
 
-	pub fn bind(self: Stmt, values: anytype) !void {
+	pub fn clearBindings(self: *const Stmt) !void {
+		if (c.duckdb_clear_bindings(self.stmt.*) == DuckDBError) {
+			return error.DuckDBError;
+		}
+	}
+
+	pub fn bind(self: *const Stmt, values: anytype) !void {
 		const stmt = self.stmt.*;
 		inline for (values, 0..) |value, i| {
 			_ = try M.bindValue(@TypeOf(value), stmt, value, i + 1);
 		}
 	}
 
-	pub fn bindValue(self: Stmt, i: usize, value: anytype) !void {
+	pub fn bindValue(self: *const Stmt, i: usize, value: anytype) !void {
 		_ = try M.bindValue(@TypeOf(value), self.stmt.*, value, i+1);
 	}
 
-	pub fn execute(self: *Stmt, state: anytype) !Rows {
+	pub fn exec(self: *const Stmt) !usize {
+		const result = try self.getResult();
+		defer {
+			c.duckdb_destroy_result(result);
+			self.conn.allocator.destroy(result);
+		}
+		return c.duckdb_rows_changed(result);
+	}
+
+	pub fn query(self: *const Stmt, state: anytype) !Rows {
 		const result = try self.getResult();
 		return Rows.init(self.conn.allocator, if (self.auto_release) self.stmt else null, result, state);
 	}
 
-	pub fn getResult(self: *Stmt) !*c.duckdb_result {
+	pub fn getResult(self: *const Stmt) !*c.duckdb_result {
 		const conn = self.conn;
 		const allocator = conn.allocator;
 
@@ -500,7 +515,7 @@ test "bind: dynamic" {
 	try stmt.bindValue(1, "over");
 	try stmt.bindValue(2, 9000);
 
-	var rows = try stmt.execute(null);
+	var rows = try stmt.query(null);
 	defer rows.deinit();
 
 	const row = (try rows.next()).?;
@@ -577,4 +592,37 @@ test "query parameters" {
 	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
 	try t.expectEqual(19, stmt.parameterTypeC(18));
 	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
+}
+
+test "Stmt: exec" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		const stmt = try conn.prepare("create table exec(id integer)", .{});
+		defer stmt.deinit();
+		try t.expectEqual(0, try stmt.exec());
+	}
+
+	{
+		const stmt = try conn.prepare("insert into exec (id) values ($1)", .{});
+		defer stmt.deinit();
+		try stmt.bindValue(0, 2);
+		try t.expectEqual(1, try stmt.exec());
+
+		try stmt.clearBindings();
+
+		try stmt.bindValue(0, 3);
+		try t.expectEqual(1, try stmt.exec());
+	}
+
+	var rows = try conn.query("select id from exec order by id", .{});
+	defer rows.deinit();
+
+	try t.expectEqual(2, (try rows.next()).?.get(i32, 0));
+	try t.expectEqual(3, (try rows.next()).?.get(i32, 0));
+	try t.expectEqual(null, try rows.next());
 }

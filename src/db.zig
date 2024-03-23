@@ -79,7 +79,7 @@ pub const DB = struct{
 		self.allocator.destroy(db);
 	}
 
-	pub fn conn(self: DB) !Conn {
+	pub fn conn(self: *const DB) !Conn {
 		return Conn.open(self);
 	}
 
