@@ -514,7 +514,6 @@ test "conn: exec cache" {
 	try t.expectEqual(null, rows.next());
 }
 
-
 fn testSQLStringType(conn: *Conn, sql: anytype) !void {
 	var rows = try conn.query(sql, .{9392, "teg"});
 	defer rows.deinit();
