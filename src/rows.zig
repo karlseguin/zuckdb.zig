@@ -246,6 +246,7 @@ fn generateScalarColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: u
 		c.DUCKDB_TYPE_DATE => return .{ .date = @ptrCast(@alignCast(raw_data)) },
 		c.DUCKDB_TYPE_TIME => return .{ .time = @ptrCast(@alignCast(raw_data)) },
 		c.DUCKDB_TYPE_TIMESTAMP => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
+		c.DUCKDB_TYPE_TIMESTAMP_TZ => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
 		c.DUCKDB_TYPE_INTERVAL => return .{ .interval = @ptrCast(@alignCast(raw_data)) },
 		c.DUCKDB_TYPE_DECIMAL => {
 			// decimal's storage is based on the width
