@@ -1,6 +1,7 @@
 const std = @import("std");
 const lib = @import("lib.zig");
 
+pub const c = lib.c;
 pub const DB = lib.DB;
 pub const Row = lib.Row;
 pub const List = lib.List;
