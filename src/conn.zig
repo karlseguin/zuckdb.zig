@@ -168,6 +168,27 @@ pub const Conn = struct {
 		return Stmt.init(stmt, self, opts);
 	}
 
+	pub fn appender(self: *Conn, schema: ?[]const u8, table: []const u8) !lib.Appender {
+		const allocator = self.allocator;
+
+		var schema_z: ?lib.StringZ = null;
+
+		defer if (schema_z) |sz| sz.deinit(allocator);
+		if (schema) |s| {
+			schema_z = try lib.stringZ(s, allocator);
+		}
+
+		const table_z = try lib.stringZ(table, allocator);
+		defer table_z.deinit(allocator);
+
+		const a = try allocator.create(c.duckdb_appender);
+		errdefer allocator.destroy(a);
+		if (c.duckdb_appender_create(self.conn.*, if (schema_z) |s| s.z else null, table_z.z, a) == DuckDBError) {
+			return error.DuckDBError;
+		}
+		return lib.Appender.init(self.allocator, a);
+	}
+
 	pub fn duckdbError(self: *Conn, err: [*c]const u8) !void {
 		const allocator = self.allocator;
 		if (self.err) |e| {
