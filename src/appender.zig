@@ -123,10 +123,10 @@ pub const Appender = struct {
 					else => appendTypeError(T),
 				}
 			},
-			.Array => rc = try self.appendValue(&value),
+			.Array => try self.appendValue(&value),
 			.Optional => {
 				if (value) |v| {
-					rc = self.appendValue(v);
+					try self.appendValue(v);
 				} else {
 					rc = c.duckdb_append_null(appender);
 				}
