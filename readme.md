@@ -149,7 +149,6 @@ The `pool` method takes an options parameter:
 * `on_connection: ?*const fn(conn: *Conn) anyerror!void` - The function to call when the pool first establishes the connection. Defaults to `null`.
 * `on_first_connection: ?*const fn(conn: *Conn) anyerror!void` - The function to call on the first connection opened by the pool. Defaults to `null`.
 
-
 # Conn
 
 ## query
@@ -271,7 +270,7 @@ The `zuckdb.Enum` is a special type which exposes two functions: `raw() [*c]cons
 `rowCache()` takes the result of `raw()`, and dupes it, giving ownership to the Rows. Thus, the string returned by `rowCache()` outlives the current row iteration and is valid until `rows.deinit()` is called. Essentially, it is an interned string representation of the enum value (which DuckDB internally represents as an integer).
 
 
-## Pool
+# Pool
 The `zuckdb.Pool` is a thread-safe connection pool:
 
 ```zig
@@ -284,7 +283,7 @@ var pool = db.pool(.{
 defer pool.deinit();
 
 var conn = try pool.acquire();
-defer pool.release(conn);
+defer conn.release();
 ```
 
 The Pool takes ownership of the DB object, thus `db.deinit` does not need to be called The `on_connection` and `on_first_connection` are optional callbacks. They both have the same signature:
@@ -294,6 +293,9 @@ The Pool takes ownership of the DB object, thus `db.deinit` does not need to be 
 ```
 
 If both are specific, the first initialized connection will first be passed to `on_first_connection` and then to `on_connection`.
+
+## newConn() !Conn
+Besides using `acquire()` to get a `!*Conn` from the pool, it's possible to create a new connection detached from the pool using `pool.newConn()`.  This is the same as calling `db.conn()` but, on the pool. Again, this connection will not be part of the pool and `release()` should not be called on it (but `deinit()` should).
 
 # Query Optimizations
 In very tight loops, performance might be improved by providing a stack-based state for the query logic to use. The `query` and `row` functions all have a `WithState` alternative, e.g.: `queryWithState`. These functions take 1 additional "query state" parameter:

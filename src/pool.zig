@@ -146,6 +146,10 @@ pub const Pool = struct {
 
 		self.cond.signal();
 	}
+
+	pub fn newConn(self: *Pool) !Conn {
+		return self.db.conn();
+	}
 };
 
 const t = std.testing;
