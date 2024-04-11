@@ -544,53 +544,53 @@ test "query parameters" {
 	try t.expectEqual(19, stmt.numberOfParameters());
 
 	// bool
-	try t.expectEqual(1, stmt.parameterTypeC(0));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BOOLEAN), stmt.parameterTypeC(0));
 	try t.expectEqual(ParameterType.bool, stmt.parameterType(0));
 
 	// int
-	try t.expectEqual(2, stmt.parameterTypeC(1));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TINYINT), stmt.parameterTypeC(1));
 	try t.expectEqual(ParameterType.i8, stmt.parameterType(1));
-	try t.expectEqual(3, stmt.parameterTypeC(2));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_SMALLINT), stmt.parameterTypeC(2));
 	try t.expectEqual(ParameterType.i16, stmt.parameterType(2));
-	try t.expectEqual(4, stmt.parameterTypeC(3));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTEGER), stmt.parameterTypeC(3));
 	try t.expectEqual(ParameterType.i32, stmt.parameterType(3));
-	try t.expectEqual(5, stmt.parameterTypeC(4));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BIGINT), stmt.parameterTypeC(4));
 	try t.expectEqual(ParameterType.i64, stmt.parameterType(4));
-	try t.expectEqual(16, stmt.parameterTypeC(5));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_HUGEINT), stmt.parameterTypeC(5));
 	try t.expectEqual(ParameterType.i128, stmt.parameterType(5));
 
 	// uint
-	try t.expectEqual(6, stmt.parameterTypeC(6));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UTINYINT), stmt.parameterTypeC(6));
 	try t.expectEqual(ParameterType.u8, stmt.parameterType(6));
-	try t.expectEqual(7, stmt.parameterTypeC(7));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_USMALLINT), stmt.parameterTypeC(7));
 	try t.expectEqual(ParameterType.u16, stmt.parameterType(7));
-	try t.expectEqual(8, stmt.parameterTypeC(8));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UINTEGER), stmt.parameterTypeC(8));
 	try t.expectEqual(ParameterType.u32, stmt.parameterType(8));
-	try t.expectEqual(9, stmt.parameterTypeC(9));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UBIGINT), stmt.parameterTypeC(9));
 	try t.expectEqual(ParameterType.u64, stmt.parameterType(9));
 
 	// float & decimal
-	try t.expectEqual(10, stmt.parameterTypeC(10));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_FLOAT), stmt.parameterTypeC(10));
 	try t.expectEqual(ParameterType.f32, stmt.parameterType(10));
-	try t.expectEqual(11, stmt.parameterTypeC(11));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DOUBLE), stmt.parameterTypeC(11));
 	try t.expectEqual(ParameterType.f64, stmt.parameterType(11));
-	try t.expectEqual(20, stmt.parameterTypeC(12));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DECIMAL), stmt.parameterTypeC(12));
 	try t.expectEqual(ParameterType.decimal, stmt.parameterType(12));
 
 	// time
-	try t.expectEqual(12, stmt.parameterTypeC(13));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIMESTAMP), stmt.parameterTypeC(13));
 	try t.expectEqual(ParameterType.timestamp, stmt.parameterType(13));
-	try t.expectEqual(13, stmt.parameterTypeC(14));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DATE), stmt.parameterTypeC(14));
 	try t.expectEqual(ParameterType.date, stmt.parameterType(14));
-	try t.expectEqual(14, stmt.parameterTypeC(15));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIME), stmt.parameterTypeC(15));
 	try t.expectEqual(ParameterType.time, stmt.parameterType(15));
-	try t.expectEqual(15, stmt.parameterTypeC(16));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTERVAL), stmt.parameterTypeC(16));
 	try t.expectEqual(ParameterType.interval, stmt.parameterType(16));
 
 	// varchar & blob
-	try t.expectEqual(18, stmt.parameterTypeC(17));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_VARCHAR), stmt.parameterTypeC(17));
 	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
-	try t.expectEqual(19, stmt.parameterTypeC(18));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BLOB), stmt.parameterTypeC(18));
 	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
 }
 
