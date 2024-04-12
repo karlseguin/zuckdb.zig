@@ -25,7 +25,7 @@ while (try rows.next()) |row| {
 Any non-primitive value that you get from the `row` are valid only until the next call to `next` or `deinit`.
 
 ## Install
-This library is tested with DuckDB 0.10.0.
+This library is tested with DuckDB 0.10.1.
 
 1) Add into `dependencies` at `build.zig.zon`:
 ```zig
