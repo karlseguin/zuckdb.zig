@@ -72,14 +72,18 @@ exe.addLibraryPath(LazyPath.relative("lib/"));
 ```
 
 ### Static Linking
-It's also possible to statically link DuckDB. 
+It's also possible to statically link DuckDB. In order to do this, you must build DuckDB yourself, in order to [compile it using Zig C++](https://github.com/ziglang/zig/issues/9832#issuecomment-926832810) and using the [bundle-library](https://github.com/duckdb/duckdb/issues/9475) target
 
-* Clone the [DuckDB repo](https://github.com/duckdb/duckdb) and checkout the `v0.10.0` branch. 
-* Build `DuckDB` using the `bundle-library` make target.
-* Copy `build/release/libduckdb_bundle.a` to your project's `lib` directory
-* Rename the file to `libduckdb.a`
-* Copy `src/include/duckdb.h` from the DuckDB repo to your project's `lib` directory
-* Add the following to your `build.zig`:
+```
+git clone -b 0.10.1 --single-branch https://github.com/duckdb/duckdb.git
+cd duckdb
+export CXX="zig c++"
+make bundle-library
+```
+
+When this finished (it will take several minutes), you can copy `build/release/libduckdb_bundle.a` and `src/include/duckdb.h` to your project's `lib` folder. Rename `libduckdb_bundle.a` to `libduckdb.a`.
+
+Finally, Add the following to your `build.zig`:
 
 ```zig
 exe.linkSystemLibrary("duckdb");
