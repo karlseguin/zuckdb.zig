@@ -78,7 +78,7 @@ It's also possible to statically link DuckDB. In order to do this, you must buil
 git clone -b 0.10.1 --single-branch https://github.com/duckdb/duckdb.git
 cd duckdb
 export CXX="zig c++"
-make bundle-library
+DUCKDB_EXTENSIONS='json' make bundle-library
 ```
 
 When this finished (it will take several minutes), you can copy `build/release/libduckdb_bundle.a` and `src/include/duckdb.h` to your project's `lib` folder. Rename `libduckdb_bundle.a` to `libduckdb.a`.
