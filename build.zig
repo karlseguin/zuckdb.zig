@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) !void {
 	const target = b.standardTargetOptions(.{});
 	const optimize = b.standardOptimizeOption(.{});
 
-	const lib_path = LazyPath.relative("lib");
+	const lib_path = b.path("lib");
 
 	_ = b.addModule("zuckdb", .{
 		.root_source_file = .{ .path = "src/zuckdb.zig" },
