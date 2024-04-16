@@ -20,7 +20,7 @@ pub const Time = c.duckdb_time_struct;
 pub const Interval = c.duckdb_interval;
 pub const UUID = [36]u8;
 
-pub const ParameterType = enum {
+pub const DataType = enum {
 	unknown,
 	bool,
 	i8,
@@ -49,11 +49,11 @@ pub const ParameterType = enum {
 	timetz,
 	timestamptz,
 
-	pub fn jsonStringify(self: ParameterType, options: std.json.StringifyOptions, out: anytype) !void {
+	pub fn jsonStringify(self: DataType, options: std.json.StringifyOptions, out: anytype) !void {
 		return std.json.encodeJsonString(@tagName(self), options, out);
 	}
 
-	pub fn fromDuckDBType(dt: c.duckdb_type) ParameterType{
+	pub fn fromDuckDBType(dt: c.duckdb_type) DataType{
 		return switch (dt) {
 			c.DUCKDB_TYPE_BOOLEAN => .bool,
 			c.DUCKDB_TYPE_TINYINT => .i8,

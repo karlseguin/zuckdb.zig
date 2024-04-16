@@ -2,7 +2,7 @@ const lib = @import("lib.zig");
 
 const c = lib.c;
 const Rows = lib.Rows;
-const ParameterType = lib.ParameterType;
+const DataType = lib.DataType;
 
 // DuckDB exposes data as "vectors", which is essentially a pointer to memory
 // that holds data based on the column type (a vector is data for a column, not
@@ -62,7 +62,7 @@ pub const ColumnData = struct {
 	pub const List = struct {
 		child: Scalar,
 		validity: [*c]u64,
-		type: ParameterType,
+		type: DataType,
 		entries: [*]c.duckdb_list_entry,
 	};
 

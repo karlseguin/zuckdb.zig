@@ -14,7 +14,7 @@ const UUID = lib.UUID;
 const Time = lib.Time;
 const Date = lib.Date;
 const Interval = lib.Interval;
-const ParameterType = lib.ParameterType;
+const DataType = lib.DataType;
 
 pub const Stmt = struct {
 	conn: *Conn,
@@ -88,12 +88,12 @@ pub const Stmt = struct {
 		return c.duckdb_nparams(self.stmt.*);
 	}
 
-	pub fn parameterTypeC(self: Stmt, i: usize) c.duckdb_type {
+	pub fn DataTypeC(self: Stmt, i: usize) c.duckdb_type {
 		return c.duckdb_param_type(self.stmt.*, i+1);
 	}
 
-	pub fn parameterType(self: Stmt, i: usize) ParameterType {
-		return ParameterType.fromDuckDBType(self.parameterTypeC(i));
+	pub fn DataType(self: Stmt, i: usize) lib.DataType {
+		return lib.DataType.fromDuckDBType(self.DataTypeC(i));
 	}
 };
 
@@ -544,54 +544,54 @@ test "query parameters" {
 	try t.expectEqual(19, stmt.numberOfParameters());
 
 	// bool
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BOOLEAN), stmt.parameterTypeC(0));
-	try t.expectEqual(ParameterType.bool, stmt.parameterType(0));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BOOLEAN), stmt.DataTypeC(0));
+	try t.expectEqual(DataType.bool, stmt.DataType(0));
 
 	// int
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TINYINT), stmt.parameterTypeC(1));
-	try t.expectEqual(ParameterType.i8, stmt.parameterType(1));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_SMALLINT), stmt.parameterTypeC(2));
-	try t.expectEqual(ParameterType.i16, stmt.parameterType(2));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTEGER), stmt.parameterTypeC(3));
-	try t.expectEqual(ParameterType.i32, stmt.parameterType(3));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BIGINT), stmt.parameterTypeC(4));
-	try t.expectEqual(ParameterType.i64, stmt.parameterType(4));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_HUGEINT), stmt.parameterTypeC(5));
-	try t.expectEqual(ParameterType.i128, stmt.parameterType(5));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TINYINT), stmt.DataTypeC(1));
+	try t.expectEqual(DataType.i8, stmt.DataType(1));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_SMALLINT), stmt.DataTypeC(2));
+	try t.expectEqual(DataType.i16, stmt.DataType(2));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTEGER), stmt.DataTypeC(3));
+	try t.expectEqual(DataType.i32, stmt.DataType(3));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BIGINT), stmt.DataTypeC(4));
+	try t.expectEqual(DataType.i64, stmt.DataType(4));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_HUGEINT), stmt.DataTypeC(5));
+	try t.expectEqual(DataType.i128, stmt.DataType(5));
 
 	// uint
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UTINYINT), stmt.parameterTypeC(6));
-	try t.expectEqual(ParameterType.u8, stmt.parameterType(6));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_USMALLINT), stmt.parameterTypeC(7));
-	try t.expectEqual(ParameterType.u16, stmt.parameterType(7));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UINTEGER), stmt.parameterTypeC(8));
-	try t.expectEqual(ParameterType.u32, stmt.parameterType(8));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UBIGINT), stmt.parameterTypeC(9));
-	try t.expectEqual(ParameterType.u64, stmt.parameterType(9));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UTINYINT), stmt.DataTypeC(6));
+	try t.expectEqual(DataType.u8, stmt.DataType(6));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_USMALLINT), stmt.DataTypeC(7));
+	try t.expectEqual(DataType.u16, stmt.DataType(7));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UINTEGER), stmt.DataTypeC(8));
+	try t.expectEqual(DataType.u32, stmt.DataType(8));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UBIGINT), stmt.DataTypeC(9));
+	try t.expectEqual(DataType.u64, stmt.DataType(9));
 
 	// float & decimal
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_FLOAT), stmt.parameterTypeC(10));
-	try t.expectEqual(ParameterType.f32, stmt.parameterType(10));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DOUBLE), stmt.parameterTypeC(11));
-	try t.expectEqual(ParameterType.f64, stmt.parameterType(11));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DECIMAL), stmt.parameterTypeC(12));
-	try t.expectEqual(ParameterType.decimal, stmt.parameterType(12));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_FLOAT), stmt.DataTypeC(10));
+	try t.expectEqual(DataType.f32, stmt.DataType(10));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DOUBLE), stmt.DataTypeC(11));
+	try t.expectEqual(DataType.f64, stmt.DataType(11));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DECIMAL), stmt.DataTypeC(12));
+	try t.expectEqual(DataType.decimal, stmt.DataType(12));
 
 	// time
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIMESTAMP), stmt.parameterTypeC(13));
-	try t.expectEqual(ParameterType.timestamp, stmt.parameterType(13));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DATE), stmt.parameterTypeC(14));
-	try t.expectEqual(ParameterType.date, stmt.parameterType(14));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIME), stmt.parameterTypeC(15));
-	try t.expectEqual(ParameterType.time, stmt.parameterType(15));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTERVAL), stmt.parameterTypeC(16));
-	try t.expectEqual(ParameterType.interval, stmt.parameterType(16));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIMESTAMP), stmt.DataTypeC(13));
+	try t.expectEqual(DataType.timestamp, stmt.DataType(13));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DATE), stmt.DataTypeC(14));
+	try t.expectEqual(DataType.date, stmt.DataType(14));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIME), stmt.DataTypeC(15));
+	try t.expectEqual(DataType.time, stmt.DataType(15));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTERVAL), stmt.DataTypeC(16));
+	try t.expectEqual(DataType.interval, stmt.DataType(16));
 
 	// varchar & blob
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_VARCHAR), stmt.parameterTypeC(17));
-	try t.expectEqual(ParameterType.varchar, stmt.parameterType(17));
-	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BLOB), stmt.parameterTypeC(18));
-	try t.expectEqual(ParameterType.blob, stmt.parameterType(18));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_VARCHAR), stmt.DataTypeC(17));
+	try t.expectEqual(DataType.varchar, stmt.DataType(17));
+	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BLOB), stmt.DataTypeC(18));
+	try t.expectEqual(DataType.blob, stmt.DataType(18));
 }
 
 test "Stmt: exec" {

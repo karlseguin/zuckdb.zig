@@ -18,7 +18,7 @@ pub const UUID = lib.UUID;
 pub const Date = lib.Date;
 pub const Time = lib.Time;
 pub const Interval = lib.Interval;
-pub const ParameterType = lib.ParameterType;
+pub const DataType = lib.DataType;
 
 pub fn StaticState(comptime N: usize) type {
 	const ColumnData = @import("column_data.zig").ColumnData;

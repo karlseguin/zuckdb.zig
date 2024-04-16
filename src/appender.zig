@@ -190,7 +190,6 @@ fn appendTypeError(comptime T: type) void {
 	@compileError("cannot append value of type " ++ @typeName(T));
 }
 
-
 const t = std.testing;
 const DB = lib.DB;
 test "Appender: basic types" {

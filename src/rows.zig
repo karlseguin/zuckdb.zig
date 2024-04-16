@@ -3,7 +3,7 @@ const lib = @import("lib.zig");
 
 const c = lib.c;
 const Row = lib.Row;
-const ParameterType = lib.ParameterType;
+const DataType = lib.DataType;
 const ColumnData = lib.ColumnData;
 
 const DuckDBError = c.DuckDBError;
@@ -145,8 +145,8 @@ pub const Rows = struct {
 		return c.duckdb_column_name(self.result, i);
 	}
 
-	pub fn columnType(self: Rows, i: usize) ParameterType {
-		return ParameterType.fromDuckDBType(self.column_types[i]);
+	pub fn columnType(self: Rows, i: usize) DataType {
+		return DataType.fromDuckDBType(self.column_types[i]);
 	}
 
 	pub fn next(self: *Rows) !?Row {
@@ -295,7 +295,7 @@ fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type
 				.child = child_data,
 				.validity = child_validity,
 				.entries = @ptrCast(@alignCast(raw_data)),
-				.type = ParameterType.fromDuckDBType(child_type),
+				.type = DataType.fromDuckDBType(child_type),
 			}};
 		},
 		else => return null,

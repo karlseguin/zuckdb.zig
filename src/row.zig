@@ -11,7 +11,7 @@ const UUID = lib.UUID;
 const Time = lib.Time;
 const Date = lib.Date;
 const Interval = lib.Interval;
-const ParameterType = lib.ParameterType;
+const DataType = lib.DataType;
 
 const Allocator = std.mem.Allocator;
 
@@ -60,7 +60,7 @@ pub const Row = struct {
 		return LazyList.init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
 	}
 
-	pub fn listItemType(self: Row, col: usize) ParameterType {
+	pub fn listItemType(self: Row, col: usize) DataType {
 		// (⌐■_■)
 		return self.columns[col].data.container.list.type;
 	}
@@ -171,16 +171,16 @@ pub fn List(comptime T: type) type {
 pub const LazyList = struct {
 	len: usize,
 	col: usize,
-	type: ParameterType,
+	type: DataType,
 	_validity: [*c]u64,
 	_offset: usize,
 	_scalar: ColumnData.Scalar,
 
-	fn init(col: usize, parameter_type: ParameterType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) LazyList {
+	fn init(col: usize, data_type: DataType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) LazyList {
 		return .{
 			.col = col,
 			.len = length,
-			.type = parameter_type,
+			.type = data_type,
 			._offset = offset,
 			._scalar = scalar,
 			._validity = validity,
