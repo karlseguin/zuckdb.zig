@@ -250,7 +250,9 @@ fn generateScalarColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: u
 		c.DUCKDB_TYPE_INTERVAL => return .{ .interval = @ptrCast(@alignCast(raw_data)) },
 		c.DUCKDB_TYPE_DECIMAL => {
 			// decimal's storage is based on the width
-			const logical_type = c.duckdb_vector_get_column_type(vector);
+			var logical_type = c.duckdb_vector_get_column_type(vector);
+			defer c.duckdb_destroy_logical_type(&logical_type);
+
 			const scale = c.duckdb_decimal_scale(logical_type);
 			const width = c.duckdb_decimal_width(logical_type);
 			const internal: ColumnData.Decimal.Internal = switch (c.duckdb_decimal_internal_type(logical_type)) {
@@ -288,7 +290,10 @@ fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type
 	switch (column_type) {
 		c.DUCKDB_TYPE_LIST => {
 			const child_vector = c.duckdb_list_vector_get_child(vector);
-			const child_type = c.duckdb_get_type_id(c.duckdb_vector_get_column_type(child_vector));
+			var logical_type = c.duckdb_vector_get_column_type(child_vector);
+			defer c.duckdb_destroy_logical_type(&logical_type);
+
+			const child_type = c.duckdb_get_type_id(logical_type);
 			const child_data = generateScalarColumnData(rows, child_vector, child_type) orelse return null;
 			const child_validity = c.duckdb_vector_get_validity(child_vector);
 			return .{.list = .{
