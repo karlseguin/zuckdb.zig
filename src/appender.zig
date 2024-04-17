@@ -5,7 +5,7 @@ const c = lib.c;
 const Date = lib.Date;
 const Time = lib.Time;
 const Interval = lib.Interval;
-const ColumnData = lib.ColumnData;
+const Vector = lib.Vector;
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
@@ -22,23 +22,14 @@ pub const Appender = struct {
 
 	allocator: Allocator,
 
-	// length of this tells us the # of columns
-	types: []c.duckdb_logical_type,
-
-	// A vector is the underlying memory of 1 column. We write directly to it.
-	// So vectors[0] would represent the first column of our appender. Based on
-	// the type at types[0] we need to write data in the correct format. Where we
-	// write depends on what we're writing (e.g. an tinyint vs a bigint) and our
-	// row_index.
-	// All vectors can hold c.duckdb_vector_size rows. So you can imagine that
-	// if our 4th column was a smallint, and we wanted to write 200 at the 10th
-	// row, we'd have to do (very pseudocode):
-
-	//   the 4th column
-	//   const v =  vector[3];
-	//   // 10th row, 2 bytes we row
-	//   v[9 * 2].* = []u8{0, 200};
+	// 1 vector per column. Part of the vector data is initialied upfront (the
+	// type information). Part of it is initialized for each data_chunk (the
+	// underlying duckdb vector data and the validity data).
 	vectors: []Vector,
+
+	// This is duplicate of data available from vectors, but we need it as a slice
+	// to pass to c.duckdb_create_data_chunk
+	types: []c.duckdb_logical_type,
 
 	// The collection of vectors for the appender. While we store data directly
 	// in the vector, most operations (e.g. flush) happen on the data chunk.
@@ -49,28 +40,27 @@ pub const Appender = struct {
 		const column_count = c.duckdb_appender_column_count(appender.*);
 
 		var types = try allocator.alloc(c.duckdb_logical_type, column_count);
-		errdefer {
-			for (types) |*tp| {
-				c.duckdb_destroy_logical_type(tp);
-			}
-			allocator.free(types);
-		}
-
-		for (0..column_count) |i| {
-			types[i] = c.duckdb_appender_column_type(appender.*, i);
-		}
+		errdefer allocator.free(types);
 
 		var vectors = try allocator.alloc(Vector, column_count);
 		errdefer allocator.free(vectors);
 
-		for (types, 0..) |tp, i| {
-			vectors[i] = try Vector.init(tp, 0);
+		var initialized: usize = 0;
+		errdefer for (0..initialized) |i| {
+			vectors[i].deinit();
+		};
+
+		for (0..column_count) |i| {
+			const logical_type = c.duckdb_appender_column_type(appender.*, i);
+			types[i] = logical_type;
+			vectors[i] = try Vector.init(undefined, logical_type);
+			initialized += 1;
 		}
 
 		return .{
 			.err = null,
-			.types = types,
 			.row_index = 0,
+			.types = types,
 			.vectors = vectors,
 			.appender = appender,
 			.allocator = allocator,
@@ -80,22 +70,22 @@ pub const Appender = struct {
 	}
 
 	pub fn deinit(self: *Appender) void {
-		const allocator = self.allocator;
-
-		for (self.types) |*tp| {
-			c.duckdb_destroy_logical_type(tp);
+		for (self.vectors) |*v| {
+			v.deinit();
 		}
+
+		const allocator = self.allocator;
+		allocator.free(self.types);
+		allocator.free(self.vectors);
 
 		if (self.data_chunk) |*data_chunk| {
 			_ = c.duckdb_destroy_data_chunk(data_chunk);
 		}
 
+
 		const appender = self.appender;
 		_ = c.duckdb_appender_destroy(appender);
 		allocator.destroy(appender);
-
-		allocator.free(self.types);
-		allocator.free(self.vectors);
 	}
 
 	fn newDataChunk(types: []c.duckdb_logical_type, vectors: []Vector) c.duckdb_data_chunk {
@@ -103,37 +93,9 @@ pub const Appender = struct {
 
 		for (0..types.len) |i| {
 			const v = c.duckdb_data_chunk_get_vector(data_chunk, i);
-
 			const vector = &vectors[i];
-			vector.vector = v;
+			vector.loadVector(v);
 			vector.validity = null;
-
-			// untyped pointer (void *) to the underlying vector's memory
-			const raw_data = c.duckdb_vector_get_data(v);
-
-			vector.data = switch (vector.data_type) {
-				c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => .{.blob = {}},
-				c.DUCKDB_TYPE_TINYINT => .{.i8 = @ptrCast(raw_data)},
-				c.DUCKDB_TYPE_SMALLINT => .{.i16 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_INTEGER => .{.i32 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_BIGINT => .{.i64 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_HUGEINT =>.{.i128 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_UHUGEINT => .{.u128 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_UTINYINT => .{.u8 = @ptrCast(raw_data)},
-				c.DUCKDB_TYPE_USMALLINT => .{.u16 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_UINTEGER => .{.u32 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_UBIGINT => .{.u64 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_BOOLEAN => .{.bool = @ptrCast(raw_data)},
-				c.DUCKDB_TYPE_FLOAT => .{.f32 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_DOUBLE => .{.f64 = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_DATE => .{.date = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_TIME => .{.time = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_TIMESTAMP => .{.timestamp = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_TIMESTAMP_TZ => .{.timestamp = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_INTERVAL => .{.interval = @ptrCast(@alignCast(raw_data))},
-				c.DUCKDB_TYPE_UUID =>  .{.uuid = @ptrCast(@alignCast(raw_data))},
-				else => unreachable,
-			};
 		}
 		return data_chunk;
 	}
@@ -229,178 +191,187 @@ pub const Appender = struct {
 		}
 
 		switch (vector.data) {
-			.bool => |data| {
-				switch (type_info) {
-					.Bool => data[row_index] = value,
-					else => return self.appendTypeError(.bool, T)
-				}
-			},
-			.i8 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < -128 or value > 127) return self.appendIntRangeError(.i8);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.i8, T)
-				}
-			},
-			.i16 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < -32768 or value > 32767) return self.appendIntRangeError(.i16);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.i16, T)
-				}
-			},
-			.i32 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < -2147483648 or value > 2147483647) return self.appendIntRangeError(.i32);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.i32, T)
-				}
-			},
-			.i64 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError(.i64);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.i64, T)
-				}
-			},
-			.i128 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < -170141183460469231731687303715884105728 or value > 170141183460469231731687303715884105727) return self.appendIntRangeError(.i128);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.i128, T)
-				}
-			},
-			.u8 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < 0 or value > 255) return self.appendIntRangeError(.u8);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.u8, T)
-				}
-			},
-			.u16 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < 0 or value > 65535) return self.appendIntRangeError(.u16);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.u16, T)
-				}
-			},
-			.u32 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < 0 or value > 4294967295) return self.appendIntRangeError(.u32);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.u32, T)
-				}
-			},
-			.u64 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < 0 or value > 18446744073709551615) return self.appendIntRangeError(.u64);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.u64, T)
-				}
-			},
-			.u128 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < 0 or value > 340282366920938463463374607431768211455) return self.appendIntRangeError(.u128);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.u128, T)
-				}
-			},
-			.f32 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
-					.Float, .ComptimeFloat => data[row_index] = @floatCast(value),
-					else => return self.appendTypeError(.f32, T)
-				}
-			},
-			.f64 => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
-					.Float, .ComptimeFloat => data[row_index] = @floatCast(value),
-					else => return self.appendTypeError(.f64, T)
-				}
-			},
-			.date => |data| if (T == Date) {
-				data[row_index] = c.duckdb_to_date(value);
-			} else {
-				return self.appendTypeError(.date, T);
-			},
-			.time => |data| if (T == Time) {
-				data[row_index] = c.duckdb_to_time(value);
-			} else {
-				return self.appendTypeError(.time, T);
-			},
-			.interval => |data| if (T == Interval) {
-				data[row_index] = value;
-			} else {
-				return self.appendTypeError(.interval, T);
-			},
-			.timestamp => |data| {
-				switch (type_info) {
-					.Int, .ComptimeInt => {
-						if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError(.i64);
-						data[row_index] = @intCast(value);
-					},
-					else => return self.appendTypeError(.timestamp, T)
-				}
-			},
-			else => unreachable,
+			.container => return self.appendTypeError("container", T),
+			.scalar => |scalar| switch (scalar) {
+				.bool => |data| {
+					switch (type_info) {
+						.Bool => data[row_index] = value,
+						else => return self.appendTypeError("boolean", T)
+					}
+				},
+				.i8 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < -128 or value > 127) return self.appendIntRangeError("tinyint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("tinyint", T)
+					}
+				},
+				.i16 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < -32768 or value > 32767) return self.appendIntRangeError("smallint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("smallint", T)
+					}
+				},
+				.i32 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < -2147483648 or value > 2147483647) return self.appendIntRangeError("integer");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("integer", T)
+					}
+				},
+				.i64 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError("bigint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("bigint", T)
+					}
+				},
+				.i128 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < -170141183460469231731687303715884105728 or value > 170141183460469231731687303715884105727) return self.appendIntRangeError("hugeint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("hugeint", T)
+					}
+				},
+				.u8 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < 0 or value > 255) return self.appendIntRangeError("utinyint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("utinyint", T)
+					}
+				},
+				.u16 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < 0 or value > 65535) return self.appendIntRangeError("usmallint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("usmallint", T)
+					}
+				},
+				.u32 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < 0 or value > 4294967295) return self.appendIntRangeError("uinteger");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("uinteger", T)
+					}
+				},
+				.u64 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < 0 or value > 18446744073709551615) return self.appendIntRangeError("ubingint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("ubingint", T)
+					}
+				},
+				.u128 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < 0 or value > 340282366920938463463374607431768211455) return self.appendIntRangeError("uhugeint");
+							data[row_index] = @intCast(value);
+						},
+						else => return self.appendTypeError("uhugeint", T)
+					}
+				},
+				.f32 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
+						.Float, .ComptimeFloat => data[row_index] = @floatCast(value),
+						else => return self.appendTypeError("real", T)
+					}
+				},
+				.f64 => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
+						.Float, .ComptimeFloat => data[row_index] = @floatCast(value),
+						else => return self.appendTypeError("double", T)
+					}
+				},
+				.date => |data| if (T == Date) {
+					data[row_index] = c.duckdb_to_date(value);
+				} else {
+					return self.appendTypeError("date", T);
+				},
+				.time => |data| if (T == Time) {
+					data[row_index] = c.duckdb_to_time(value);
+				} else {
+					return self.appendTypeError("time", T);
+				},
+				.interval => |data| if (T == Interval) {
+					data[row_index] = value;
+				} else {
+					return self.appendTypeError("interval", T);
+				},
+				.timestamp => |data| {
+					switch (type_info) {
+						.Int, .ComptimeInt => {
+							if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError("i64");
+							data[row_index] = .{.micros = @intCast(value)};
+						},
+						else => return self.appendTypeError("timestamp", T)
+					}
+				},
+				else => unreachable,
+			}
 		}
 	}
 
 	fn appendSlice(self: *Appender, vector: *Vector, value: anytype, row_index: usize) !void {
 		const T = @TypeOf(value);
 		if (T == []u8 or T == []const u8) {
-			switch (vector.data_type) {
-				c.DUCKDB_TYPE_UUID => switch (vector.data) {
-					.uuid => |data| {
-						var n: i128 = 0;
-						if (value.len == 36) {
-							n = try uuidToInt(value);
-						} else if (value.len == 16) {
-							n = std.mem.readInt(i128, value[0..16], .big);
-						} else {
-							return error.InvalidUUID;
-						}
-						data[row_index] = n ^ (@as(i128, 1) << 127);
-					},
-					else => return self.appendTypeError(.i128, lib.UUID),
-				},
-				else => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
-			}
-			return;
+			return self.appendString(vector, value, row_index);
 		}
-
 		// TODO
 		appendError(T);
 	}
 
-	fn appendTypeError(self: *Appender, comptime data_type: DataType, value_type: type) error{AppendError} {
-		self.err = "cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ @tagName(data_type);
+	fn appendString(self: *Appender, vector: *Vector, value: anytype, row_index: usize) !void {
+		switch (vector.data) {
+			.container => return self.appendTypeError("container", @TypeOf(value)),
+			.scalar => |scalar| switch (scalar) {
+				.blob => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
+				.i128 => |data| {
+					var n: i128 = 0;
+					if (value.len == 36) {
+						n = try uuidToInt(value);
+					} else if (value.len == 16) {
+						n = std.mem.readInt(i128, value[0..16], .big);
+					} else {
+						return error.InvalidUUID;
+					}
+					data[row_index] = n ^ (@as(i128, 1) << 127);
+				},
+				else => {
+					// we don't want to allocate, and we don't know the vector type at compile time, so we use ???. Fail.
+					return self.appendTypeError("???", lib.UUID);
+				},
+			}
+		}
+	}
+
+	fn appendTypeError(self: *Appender, comptime data_type: []const u8, value_type: type) error{AppendError} {
+		self.err = "cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ data_type;
 		return error.AppendError;
 	}
 
-	fn appendIntRangeError(self: *Appender, comptime data_type: DataType) error{AppendError} {
-		self.err = "integer is outside of range for a column of type " ++ @tagName(data_type);
+	fn appendIntRangeError(self: *Appender, comptime data_type: []const u8) error{AppendError} {
+		self.err = "value is outside of range for a column of type " ++ data_type;
 		return error.AppendError;
 	}
 };
@@ -409,110 +380,107 @@ fn appendError(comptime T: type) void {
 	@compileError("cannot append value of type " ++ @typeName(T));
 }
 
-// The Vector is initially initialized with just its data_type and, in the case
-// of lists and struct, the empty children.  When a new data chunk is created
-// the Vector's underlying duckdb_vector and data pointer are initialized. This
-// allows us to re-use some parts of the Vector across multple data chunks.
-const Vector = struct {
-	data_type: c.duckdb_type,
+// // The Vector is initially initialized with just its data_type and, in the case
+// // of lists and struct, the empty children.  When a new data chunk is created
+// // the Vector's underlying duckdb_vector and data pointer are initialized. This
+// // allows us to re-use some parts of the Vector across multple data chunks.
+// const Vector = struct {
+// 	data_type: c.duckdb_type,
 
-	// Only list and struct types have children vectors
-	children: []Vector = &[_]Vector{},
+// 	// initialized when a new data_chunk is created
+// 	vector: c.duckdb_vector = undefined,
 
+// 	// initialized when a new data_chunk is created, a typed pointer to the underlying
+// 	// vector data (which is a void * in C).
+// 	data: TypedData = undefined,
 
-	// initialized when a new data_chunk is created
-	vector: c.duckdb_vector = undefined,
+// 	// initialized when we first try to set null, reset to null on each new chunk
+// 	validity: ?[*c]u64 = null,
 
-	// initialized when a new data_chunk is created, a typed pointer to the underlying
-	// vector data (which is a void * in C).
-	data: TypedData = undefined,
+// 	fn init(logical_type: c.duckdb_logical_type, col: usize) !Vector {
+// 		_ = col;
 
-	// initialized when we first try to set null, reset to null on each new chunk
-	validity: ?[*c]u64 = null,
+// 		const tp = c.duckdb_get_type_id(logical_type);
+// 		switch (tp) {
+// 			c.DUCKDB_TYPE_BOOLEAN,
+// 			c.DUCKDB_TYPE_TINYINT,
+// 			c.DUCKDB_TYPE_SMALLINT,
+// 			c.DUCKDB_TYPE_INTEGER,
+// 			c.DUCKDB_TYPE_BIGINT,
+// 			c.DUCKDB_TYPE_UTINYINT,
+// 			c.DUCKDB_TYPE_USMALLINT,
+// 			c.DUCKDB_TYPE_UINTEGER,
+// 			c.DUCKDB_TYPE_UBIGINT,
+// 			c.DUCKDB_TYPE_HUGEINT,
+// 			c.DUCKDB_TYPE_UHUGEINT,
+// 			c.DUCKDB_TYPE_FLOAT,
+// 			c.DUCKDB_TYPE_DOUBLE,
+// 			c.DUCKDB_TYPE_VARCHAR,
+// 			c.DUCKDB_TYPE_BLOB,
+// 			c.DUCKDB_TYPE_TIMESTAMP,
+// 			c.DUCKDB_TYPE_DATE,
+// 			c.DUCKDB_TYPE_TIME,
+// 			c.DUCKDB_TYPE_INTERVAL,
+// 			c.DUCKDB_TYPE_BIT,
+// 			c.DUCKDB_TYPE_TIME_TZ,
+// 			c.DUCKDB_TYPE_TIMESTAMP_TZ,
+// 			c.DUCKDB_TYPE_DECIMAL,
+// 			c.DUCKDB_TYPE_UUID,
+// 			c.DUCKDB_TYPE_ENUM => return .{.data_type = tp},
+// 			// c.DUCKDB_TYPE_LIST => .list,
+// 			else => return error.UnsupportedAppendColumnType,
+// 		}
+// 	}
+// };
 
-	fn init(logical_type: c.duckdb_logical_type, col: usize) !Vector {
-		_ = col;
+// const DataType = enum {
+// 	i8,
+// 	i16,
+// 	i32,
+// 	i64,
+// 	i128,
+// 	u128,
+// 	u8,
+// 	u16,
+// 	u32,
+// 	u64,
+// 	bool,
+// 	f32,
+// 	f64,
+// 	blob,
+// 	varchar,
+// 	date,
+// 	time,
+// 	timestamp,
+// 	interval,
+// 	uuid,
+// };
 
-		const tp = c.duckdb_get_type_id(logical_type);
-		switch (tp) {
-			c.DUCKDB_TYPE_BOOLEAN,
-			c.DUCKDB_TYPE_TINYINT,
-			c.DUCKDB_TYPE_SMALLINT,
-			c.DUCKDB_TYPE_INTEGER,
-			c.DUCKDB_TYPE_BIGINT,
-			c.DUCKDB_TYPE_UTINYINT,
-			c.DUCKDB_TYPE_USMALLINT,
-			c.DUCKDB_TYPE_UINTEGER,
-			c.DUCKDB_TYPE_UBIGINT,
-			c.DUCKDB_TYPE_HUGEINT,
-			c.DUCKDB_TYPE_UHUGEINT,
-			c.DUCKDB_TYPE_FLOAT,
-			c.DUCKDB_TYPE_DOUBLE,
-			c.DUCKDB_TYPE_VARCHAR,
-			c.DUCKDB_TYPE_BLOB,
-			c.DUCKDB_TYPE_TIMESTAMP,
-			c.DUCKDB_TYPE_DATE,
-			c.DUCKDB_TYPE_TIME,
-			c.DUCKDB_TYPE_INTERVAL,
-			c.DUCKDB_TYPE_BIT,
-			c.DUCKDB_TYPE_TIME_TZ,
-			c.DUCKDB_TYPE_TIMESTAMP_TZ,
-			c.DUCKDB_TYPE_DECIMAL,
-			c.DUCKDB_TYPE_UUID,
-			c.DUCKDB_TYPE_ENUM => return .{.data_type = tp},
-			// c.DUCKDB_TYPE_LIST => .list,
-			else => return error.UnsupportedAppendColumnType,
-		}
-	}
-};
+// const TypedData = union(DataType) {
+// 	i8: [*c]i8,
+// 	i16: [*c]i16,
+// 	i32: [*c]i32,
+// 	i64: [*c]i64,
+// 	i128: [*c]i128,
+// 	u128: [*c]u128,
+// 	u8: [*c]u8,
+// 	u16: [*c]u16,
+// 	u32: [*c]u32,
+// 	u64: [*c]u64,
+// 	bool: [*c]bool,
+// 	f32: [*c]f32,
+// 	f64: [*c]f64,
+// 	blob: void,
+// 	varchar: void,
+// 	date: [*]c.duckdb_date,
+// 	time: [*]c.duckdb_time,
+// 	timestamp: [*]i64,
+// 	interval: [*]c.duckdb_interval,
+// 	uuid: [*c]i128,
+// 	list: [*c]cduckdb_list_entry,
+// };
 
-const DataType = enum {
-	i8,
-	i16,
-	i32,
-	i64,
-	i128,
-	u128,
-	u8,
-	u16,
-	u32,
-	u64,
-	bool,
-	f32,
-	f64,
-	blob,
-	varchar,
-	date,
-	time,
-	timestamp,
-	interval,
-	uuid,
-};
-
-const TypedData = union(DataType) {
-	i8: [*c]i8,
-	i16: [*c]i16,
-	i32: [*c]i32,
-	i64: [*c]i64,
-	i128: [*c]i128,
-	u128: [*c]u128,
-	u8: [*c]u8,
-	u16: [*c]u16,
-	u32: [*c]u32,
-	u64: [*c]u64,
-	bool: [*c]bool,
-	f32: [*c]f32,
-	f64: [*c]f64,
-	blob: void,
-	varchar: void,
-	date: [*]c.duckdb_date,
-	time: [*]c.duckdb_time,
-	timestamp: [*]i64,
-	interval: [*]c.duckdb_interval,
-	uuid: [*c]i128,
-};
-
-fn uuidToInt	(hex: []const u8) !i128 {
+fn uuidToInt(hex: []const u8) !i128 {
 	var bin: [16]u8 = undefined;
 
 	std.debug.assert(hex.len == 36);
@@ -556,14 +524,14 @@ test "Appender: bind errors" {
 		var appender = try conn.appender(null, "x");
 		defer appender.deinit();
 		try t.expectError(error.AppendError, appender.appendRow(.{true}));
-		try t.expectEqualStrings("cannot bind a bool to a column of type i32", appender.err.?);
+		try t.expectEqualStrings("cannot bind a bool to a column of type integer", appender.err.?);
 	}
 
 	{
 		var appender = try conn.appender(null, "x");
 		defer appender.deinit();
 		try t.expectError(error.AppendError, appender.appendRow(.{9147483647}));
-		try t.expectEqualStrings("integer is outside of range for a column of type i32", appender.err.?);
+		try t.expectEqualStrings("value is outside of range for a column of type integer", appender.err.?);
 	}
 }
 

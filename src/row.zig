@@ -25,11 +25,11 @@ pub const Row = struct {
 
 		const TT = switch (@typeInfo(T)) {
 			.Optional => |opt| blk: {
-				if (_isNull(vector.validity, index)) return null;
+				if (_isNull(vector.validity.?, index)) return null;
 				break :blk opt.child;
 			},
 			else => blk: {
-				lib.assert(_isNull(vector.validity, index) == false);
+				lib.assert(_isNull(vector.validity.?, index) == false);
 				break :blk T;
 			},
 		};
@@ -43,7 +43,7 @@ pub const Row = struct {
 	pub fn list(self: Row, comptime T: type, col: usize) ?List(T) {
 		const index = self.index;
 		const vector = self.vectors[col];
-		if (_isNull(vector.validity, index)) return null;
+		if (_isNull(vector.validity.?, index)) return null;
 
 		const vc = vector.data.container.list;
 		const entry = vc.entries[index];
@@ -53,7 +53,7 @@ pub const Row = struct {
 	pub fn lazyList(self: Row, col: usize) ?LazyList {
 		const index = self.index;
 		const vector = self.vectors[col];
-		if (_isNull(vector.validity, index)) return null;
+		if (_isNull(vector.validity.?, index)) return null;
 
 		const vc = vector.data.container.list;
 		const entry = vc.entries[index];
@@ -66,7 +66,7 @@ pub const Row = struct {
 	}
 
 	pub fn isNull(self: Row, col: usize) bool {
-		return _isNull(self.vectors[col].validity, self.index);
+		return _isNull(self.vectors[col].validity.?, self.index);
 	}
 };
 

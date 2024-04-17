@@ -89,15 +89,7 @@ pub const Rows = struct {
 		}
 
 		for (0..column_count) |i| {
-			vectors[i] = .{
-				// loaded when we actually read a chunk
-				.data = undefined,
-				// loaded when we actually read a chunk
-				.validity = undefined,
-
-				// loaded once and re-used for each chunk
-				.type = try Vector.Type.init(aa, c.duckdb_column_logical_type(result, i)),
-			};
+			vectors[i] = try Vector.init(aa, c.duckdb_column_logical_type(result, i));
 		}
 
 		return .{
@@ -115,7 +107,7 @@ pub const Rows = struct {
 
 	pub fn deinit(self: Rows) void {
 		for (self.vectors) |*v| {
-			v.type.deinit();
+			v.deinit();
 		}
 
 		const allocator = self.allocator;
@@ -200,12 +192,7 @@ pub const Rows = struct {
 			for (0..column_count) |col| {
 				const vector = &vectors[col];
 				const real_vector = c.duckdb_data_chunk_get_vector(chunk, col);
-
-				vector.data = switch (vector.type) {
-					.list => |*l| .{.container = generateListData(l, real_vector)},
-					.scalar => |*s| .{.scalar = generateScalarData(s, real_vector)},
-				};
-
+				vector.loadVector(real_vector);
 				vector.validity = c.duckdb_vector_get_validity(real_vector);
 			}
 
@@ -218,77 +205,6 @@ pub const Rows = struct {
 		unreachable;
 	}
 };
-
-fn generateScalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.Scalar {
-	const raw_data = c.duckdb_vector_get_data(real_vector);
-	switch (scalar_type.*) {
-		.@"enum" => |*e| {
-			return .{.@"enum" = .{
-				.cache = &e.cache,
-				.logical_type = e.logical_type,
-				.internal = switch (e.type) {
-					.u8 => .{ .u8 = @ptrCast(raw_data) },
-					.u16 => .{ .u16 = @ptrCast(@alignCast(raw_data)) },
-					.u32 => .{ .u32 = @ptrCast(@alignCast(raw_data)) },
-					.u64 => .{ .u64 = @ptrCast(@alignCast(raw_data)) },
-				},
-			}};
-		},
-		.decimal => |d| {
-			return .{.decimal = .{
-				.width = d.width,
-				.scale = d.scale,
-				.internal = switch (d.type) {
-					.i16 => .{ .i16 = @ptrCast(@alignCast(raw_data)) },
-					.i32 => .{ .i32 = @ptrCast(@alignCast(raw_data)) },
-					.i64 => .{ .i64 = @ptrCast(@alignCast(raw_data)) },
-					.i128 => .{ .i128 = @ptrCast(@alignCast(raw_data)) },
-				},
-			}};
-		},
-		.simple => |s| switch (s) {
-			c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => return .{ .blob = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_TINYINT => return .{ .i8 = @ptrCast(raw_data) },
-			c.DUCKDB_TYPE_SMALLINT => return .{ .i16 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_INTEGER => return .{ .i32 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_BIGINT => return .{ .i64 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID => return .{ .i128 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_UHUGEINT => return .{ .u128 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_UTINYINT => return .{ .u8 = @ptrCast(raw_data) },
-			c.DUCKDB_TYPE_USMALLINT => return .{ .u16 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_UINTEGER => return .{ .u32 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_UBIGINT => return .{ .u64 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_BOOLEAN => return .{ .bool = @ptrCast(raw_data) },
-			c.DUCKDB_TYPE_FLOAT => return .{ .f32 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_DOUBLE => return .{ .f64 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_DATE => return .{ .date = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_TIME => return .{ .time = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_TIMESTAMP => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_TIMESTAMP_TZ => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_INTERVAL => return .{ .interval = @ptrCast(@alignCast(raw_data)) },
-			else => unreachable,
-		}
-	}
-}
-
-fn generateListData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.Container {
-	const raw_data = c.duckdb_vector_get_data(real_vector);
-
-	const child_vector = c.duckdb_list_vector_get_child(real_vector);
-	const child_data = generateScalarData(child_type, child_vector);
-	const child_validity = c.duckdb_vector_get_validity(child_vector);
-
-	return .{.list = .{
-		.child = child_data,
-		.validity = child_validity,
-		.entries = @ptrCast(@alignCast(raw_data)),
-		.type = switch (child_type.*) {
-			.@"enum" => c.DUCKDB_TYPE_ENUM,
-			.decimal => c.DUCKDB_TYPE_DECIMAL,
-			.simple => |s| s,
-		},
-	}};
-}
 
 const t = std.testing;
 const DB = lib.DB;
