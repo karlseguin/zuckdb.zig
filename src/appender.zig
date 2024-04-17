@@ -55,6 +55,15 @@ pub const Appender = struct {
 			types[i] = logical_type;
 			vectors[i] = try Vector.init(undefined, logical_type);
 			initialized += 1;
+
+			switch (vectors[i].type) {
+				.list => {},
+				.scalar => |scalar| switch (scalar) {
+					.simple => {},
+					.@"enum" => return error.CannotAppendToEnum,
+					.decimal => return error.CannotAppendToDecimal,
+				},
+			}
 		}
 
 		return .{
@@ -345,7 +354,7 @@ pub const Appender = struct {
 		switch (vector.data) {
 			.container => return self.appendTypeError("container", @TypeOf(value)),
 			.scalar => |scalar| switch (scalar) {
-				.blob => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
+				.blob, .varchar => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
 				.i128 => |data| {
 					var n: i128 = 0;
 					if (value.len == 36) {
@@ -535,7 +544,7 @@ test "Appender: bind errors" {
 	}
 }
 
-test "Appender: basic types" {
+test "Appender: simple types" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
@@ -575,7 +584,7 @@ test "Appender: basic types" {
 			255, 65535, 4294967295, 18446744073709551615, 340282366920938463463374607431768211455,
 			true, -1.23, 1994.848288123, "over 9000!", &[_]u8{1, 2, 3, 254}, "34c667cd-638e-40c2-b256-0f78ccab7013",
 			Date{.year = 2023, .month = 5, .day = 10}, Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456},
-			Interval{.months = 3, .days = 7, .micros = 982810}, 1711506018088167,
+			Interval{.months = 3, .days = 7, .micros = 982810}, 1711506018088167
 		});
 		try appender.flush();
 
@@ -743,7 +752,8 @@ test "Appender: hugeint" {
 
 	_ = try conn.exec("create table x (a hugeint)", .{});
 
-	var expected: [1000]i128 = undefined;
+	const COUNT = 1000;
+	var expected: [COUNT]i128 = undefined;
 	{
 		var seed: u64 = undefined;
 		std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
@@ -755,7 +765,7 @@ test "Appender: hugeint" {
 		var appender = try conn.appender(null, "x");
 		defer appender.deinit();
 
-		for (0..1000) |i| {
+		for (0..COUNT) |i| {
 			const value = random.int(i128);
 			expected[i] = value;
 			try appender.appendRow(.{value});
@@ -771,5 +781,5 @@ test "Appender: hugeint" {
 		try t.expectEqual(expected[@intCast(i)], row.get(i128, 0));
 		i += 1;
 	}
-	try t.expectEqual(1000, i);
+	try t.expectEqual(COUNT, i);
 }

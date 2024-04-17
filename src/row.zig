@@ -107,6 +107,7 @@ pub const Enum = struct {
 		// ArenaAllocator, so it's right, but it is  ugly and error prone should
 		// anything ever change
 		const value = try self._cache.allocator.dupe(u8, std.mem.span(string_value));
+		c.duckdb_free(string_value);
 		gop.value_ptr.* = value;
 		return value;
 	}

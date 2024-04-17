@@ -273,7 +273,6 @@ The `zuckdb.Enum` is a special type which exposes two functions: `raw() [*c]cons
 
 `rowCache()` takes the result of `raw()`, and dupes it, giving ownership to the Rows. Thus, the string returned by `rowCache()` outlives the current row iteration and is valid until `rows.deinit()` is called. Essentially, it is an interned string representation of the enum value (which DuckDB internally represents as an integer).
 
-
 # Pool
 The `zuckdb.Pool` is a thread-safe connection pool:
 
@@ -311,3 +310,38 @@ var rows = try conn.queryWithState(SQL, .{ARGS}, &state);
 ```
 
 The value passed to `zuckdb.StaticState` is the number of columns returned by the query. The `state` must remain valid until `rows.deinit()` is called.
+
+# Appender
+The fastest way to insert a large amount of data is to use the appender:
+
+```zig
+// the first parameter is the schema, or null to use the default schema
+var appender = try conn.appender(null, "my_table");
+defer appender.deinit();
+
+for (...) {
+    try appender.appendRow(.{"over", 9001, true});
+}
+// The appender auto-flushes, but it should be called once at the end.
+try appender.flush();
+```
+
+The order of the values used in `appendRow` is the order of the columns as they are defined in the table (e.g. the order that `describe $table` returns).
+
+## Alterative API
+The `appender.appendRow` function depends on the fact that you comptime knowledge of the underlying table. If you are dealing with dynamic (e.g. user-defined) schemas, that won't always be the case. Instead, use the more explicit `beginRow()`, `appendValue()` and `endRow()` calls. When using this api. When using this API, it isn't necessary to call `flush` (but you can if you want).
+
+```zig
+for (...) {
+    appender.beginRow();
+    appender.appendValue("over", 0);
+    appender.appendValue(9001, 1);
+    appender.appendValue(true, 2);
+    try appender.endRow();
+}
+```
+
+The `appendRow()` call translates to the above, more explicit, dance.
+
+## Type Support
+The appender only supports basic types. It does not support decimals or enums. Support for one-dimension lists is upcoming.
