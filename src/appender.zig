@@ -733,3 +733,43 @@ test "Appender: implicit and explicit flush" {
 	}
 	try t.expectEqual(5002, i);
 }
+
+test "Appender: hugeint" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table x (a hugeint)", .{});
+
+	var expected: [1000]i128 = undefined;
+	{
+		var seed: u64 = undefined;
+		std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
+		var prng = std.rand.DefaultPrng.init(seed);
+
+		const random = prng.random();
+
+
+		var appender = try conn.appender(null, "x");
+		defer appender.deinit();
+
+		for (0..1000) |i| {
+			const value = random.int(i128);
+			expected[i] = value;
+			try appender.appendRow(.{value});
+		}
+		try appender.flush();
+	}
+
+	var rows = try conn.query("select * from x", .{});
+	defer rows.deinit();
+
+	var i: i32 = 0;
+	while (try rows.next()) |row| {
+		try t.expectEqual(expected[@intCast(i)], row.get(i128, 0));
+		i += 1;
+	}
+	try t.expectEqual(1000, i);
+}
