@@ -2,196 +2,571 @@ const std = @import("std");
 const lib = @import("lib.zig");
 
 const c = lib.c;
-const Conn = lib.Conn;
-const Time = lib.Time;
 const Date = lib.Date;
+const Time = lib.Time;
 const Interval = lib.Interval;
+const ColumnData = lib.ColumnData;
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
 pub const Appender = struct {
-	column_index: usize,
-	allocator: Allocator,
-	appender: *c.duckdb_appender,
-	type_lookup: std.AutoHashMapUnmanaged(usize, c.duckdb_type),
+	// Error message, if any
+	err: ?[]const u8,
 
-	pub fn init(allocator: Allocator, appender: *c.duckdb_appender) Appender {
+	// the row of the current chunk that we're writing at
+	row_index: usize,
+
+	// c.duckdb_vector_size (2048)..when row_index == 2047, we flush and create
+	// a new chunk
+	vector_size: usize,
+
+	allocator: Allocator,
+
+	// length of this tells us the # of columns
+	types: []c.duckdb_logical_type,
+
+	// A vector is the underlying memory of 1 column. We write directly to it.
+	// So vectors[0] would represent the first column of our appender. Based on
+	// the type at types[0] we need to write data in the correct format. Where we
+	// write depends on what we're writing (e.g. an tinyint vs a bigint) and our
+	// row_index.
+	// All vectors can hold c.duckdb_vector_size rows. So you can imagine that
+	// if our 4th column was a smallint, and we wanted to write 200 at the 10th
+	// row, we'd have to do (very pseudocode):
+
+	//   the 4th column
+	//   const v =  vector[3];
+	//   // 10th row, 2 bytes we row
+	//   v[9 * 2].* = []u8{0, 200};
+	vectors: []Vector,
+
+	// The collection of vectors for the appender. While we store data directly
+	// in the vector, most operations (e.g. flush) happen on the data chunk.
+	data_chunk: ?c.duckdb_data_chunk,
+	appender: *c.duckdb_appender,
+
+	pub fn init(allocator: Allocator, appender: *c.duckdb_appender) !Appender {
+		const column_count = c.duckdb_appender_column_count(appender.*);
+
+		var types = try allocator.alloc(c.duckdb_logical_type, column_count);
+		errdefer {
+			for (types) |*tp| {
+				c.duckdb_destroy_logical_type(tp);
+			}
+			allocator.free(types);
+		}
+
+		for (0..column_count) |i| {
+			types[i] = c.duckdb_appender_column_type(appender.*, i);
+		}
+
+		var vectors = try allocator.alloc(Vector, column_count);
+		errdefer allocator.free(vectors);
+
+		for (types, 0..) |tp, i| {
+			vectors[i] = try Vector.init(tp, 0);
+		}
+
 		return .{
-			.column_index = 0,
+			.err = null,
+			.types = types,
+			.row_index = 0,
+			.vectors = vectors,
 			.appender = appender,
 			.allocator = allocator,
-			.type_lookup = std.AutoHashMapUnmanaged(usize, c.duckdb_type){},
+			.data_chunk = null,
+			.vector_size = c.duckdb_vector_size(),
 		};
 	}
 
 	pub fn deinit(self: *Appender) void {
+		const allocator = self.allocator;
+
+		for (self.types) |*tp| {
+			c.duckdb_destroy_logical_type(tp);
+		}
+
+		if (self.data_chunk) |*data_chunk| {
+			_ = c.duckdb_destroy_data_chunk(data_chunk);
+		}
+
 		const appender = self.appender;
 		_ = c.duckdb_appender_destroy(appender);
-		self.allocator.destroy(appender);
-		self.type_lookup.deinit(self.allocator);
+		allocator.destroy(appender);
+
+		allocator.free(self.types);
+		allocator.free(self.vectors);
 	}
 
-	pub fn flush(self: Appender) !void {
-		if (c.duckdb_appender_flush(self.appender.*) == DuckDBError) {
+	fn newDataChunk(types: []c.duckdb_logical_type, vectors: []Vector) c.duckdb_data_chunk {
+		const data_chunk = c.duckdb_create_data_chunk(types.ptr, types.len);
+
+		for (0..types.len) |i| {
+			const v = c.duckdb_data_chunk_get_vector(data_chunk, i);
+
+			const vector = &vectors[i];
+			vector.vector = v;
+			vector.validity = null;
+
+			// untyped pointer (void *) to the underlying vector's memory
+			const raw_data = c.duckdb_vector_get_data(v);
+
+			vector.data = switch (vector.data_type) {
+				c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => .{.blob = {}},
+				c.DUCKDB_TYPE_TINYINT => .{.i8 = @ptrCast(raw_data)},
+				c.DUCKDB_TYPE_SMALLINT => .{.i16 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_INTEGER => .{.i32 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_BIGINT => .{.i64 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_HUGEINT =>.{.i128 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_UHUGEINT => .{.u128 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_UTINYINT => .{.u8 = @ptrCast(raw_data)},
+				c.DUCKDB_TYPE_USMALLINT => .{.u16 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_UINTEGER => .{.u32 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_UBIGINT => .{.u64 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_BOOLEAN => .{.bool = @ptrCast(raw_data)},
+				c.DUCKDB_TYPE_FLOAT => .{.f32 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_DOUBLE => .{.f64 = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_DATE => .{.date = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_TIME => .{.time = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_TIMESTAMP => .{.timestamp = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_TIMESTAMP_TZ => .{.timestamp = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_INTERVAL => .{.interval = @ptrCast(@alignCast(raw_data))},
+				c.DUCKDB_TYPE_UUID =>  .{.uuid = @ptrCast(@alignCast(raw_data))},
+				else => unreachable,
+			};
+		}
+		return data_chunk;
+	}
+
+	pub fn flush(self: *Appender) !void {
+		var data_chunk = self.data_chunk orelse return;
+		// if (self.row_index < self.vector_size) {
+			c.duckdb_data_chunk_set_size(data_chunk, self.row_index);
+		// }
+
+		const appender = self.appender;
+		if (c.duckdb_append_data_chunk(appender.*, data_chunk) == DuckDBError) {
+			if (c.duckdb_appender_error(appender.*)) |c_err| {
+				self.err = std.mem.span(c_err);
+			}
 			return error.DuckDBError;
 		}
+
+		if (c.duckdb_appender_flush(self.appender.*) == DuckDBError) {
+			if (c.duckdb_appender_error(appender.*)) |c_err| {
+				self.err = std.mem.span(c_err);
+			}
+			return error.DuckDBError;
+		}
+
+		c.duckdb_destroy_data_chunk(&data_chunk);
+		self.data_chunk = null;
 	}
 
-	pub fn close(self: Appender) !void {
-		if (c.duckdb_appender_close(self.appender.*) == DuckDBError) {
-			return error.DuckDBError;
+	pub fn appendRow(self: *Appender, values: anytype) !void {
+		self.beginRow();
+
+		inline for (values, 0..) |value, i| {
+			try self.appendValue(value, i);
+		}
+		try self.endRow();
+	}
+
+	// The appender has two apis. The simplest is to call appendRow, passing the full
+	// row. When using appendRow, things mostly just work.
+	// It's also possible to call appendValue for each column. This API is used
+	// when the "row" isn't known at comptime - the app has no choice but to
+	// call appendValue for each column. In such cases, we require an explicit
+	// call to beginRow, bindValue and endRow.
+	pub fn beginRow(self: *Appender) void {
+		if (self.data_chunk == null) {
+			self.data_chunk = newDataChunk(self.types, self.vectors);
+			self.row_index = 0;
 		}
 	}
 
 	pub fn endRow(self: *Appender) !void {
-		self.column_index = 0;
-		if (c.duckdb_appender_end_row(self.appender.*) == DuckDBError) {
-			return error.DuckDBError;
+		const row_index = self.row_index  + 1;
+		self.row_index = row_index;
+		if (row_index == self.vector_size) {
+			try self.flush();
 		}
 	}
 
-	pub fn err(self: Appender) ?[]const u8 {
-		const c_err = c.duckdb_appender_error(self.appender.*);
-		return if (c_err) |e| return std.mem.span(e) else null;
-	}
+	pub fn appendValue(self: *Appender, value: anytype, column: usize) !void {
+		var vector = &self.vectors[column];
+		const row_index = self.row_index;
 
-	pub fn getType(self: *Appender) !c.duckdb_type {
-		const gop = try self.type_lookup.getOrPut(self.allocator, self.column_index);
-		if (gop.found_existing == false) {
-			var logical_type = c.duckdb_appender_column_type(self.appender.*, self.column_index);
-			defer c.duckdb_destroy_logical_type(&logical_type);
-			gop.value_ptr.* = c.duckdb_get_type_id(logical_type);
-		}
-		return gop.value_ptr.*;
-	}
-
-	pub fn append(self: *Appender, value: anytype) !void {
-		const column_index = self.column_index;
-		defer self.column_index = column_index + 1;
-		return self.appendValue(value);
-	}
-
-	fn appendValue(self: *Appender, value: anytype) !void {
-		var rc: c_uint = 0;
 		const T = @TypeOf(value);
-
-		const appender = self.appender.*;
-		switch (@typeInfo(T)) {
-			.Null => rc = c.duckdb_append_null(appender),
-			.ComptimeInt => rc = try self.appendI64(@intCast(value)),
-			.ComptimeFloat => rc = c.duckdb_append_double(appender, @floatCast(value)),
-			.Int => |int| {
-				if (int.signedness == .signed) {
-					switch (int.bits) {
-						1...8 => rc = c.duckdb_append_int8(appender, @intCast(value)),
-						9...16 => rc = c.duckdb_append_int16(appender, @intCast(value)),
-						17...32 => rc = c.duckdb_append_int32(appender, @intCast(value)),
-						33...63 => rc = c.duckdb_append_int64(appender, @intCast(value)),
-						64 => rc = try self.appendI64(value),
-						65...128 => rc = c.duckdb_append_hugeint(appender, lib.hugeInt(@intCast(value))),
-						else => appendTypeError(T),
-					}
-				} else {
-					switch (int.bits) {
-						1...8 => rc = c.duckdb_append_uint8(appender, @intCast(value)),
-						9...16 => rc = c.duckdb_append_uint16(appender, @intCast(value)),
-						17...32 => rc = c.duckdb_append_uint32(appender, @intCast(value)),
-						33...64 => rc = c.duckdb_append_uint64(appender, @intCast(value)),
-						65...128 => rc = c.duckdb_append_uhugeint(appender, lib.uhugeInt(@intCast(value))),
-						else => appendTypeError(T),
-					}
-				}
+		const type_info = @typeInfo(T);
+		switch (type_info) {
+			.Null => {
+				const validity = vector.validity orelse blk: {
+					c.duckdb_vector_ensure_validity_writable(vector.vector);
+					const v = c.duckdb_vector_get_validity(vector.vector);
+					vector.validity = v;
+					break :blk v;
+				};
+				c.duckdb_validity_set_row_invalid(validity, row_index);
+				return;
 			},
-			.Float => |float| {
-				switch (float.bits) {
-					1...32 => rc = c.duckdb_append_float(appender,  @floatCast(value)),
-					33...64 => rc = c.duckdb_append_double(appender,  @floatCast(value)),
-					else => appendTypeError(T),
-				}
-			},
-			.Bool => rc = c.duckdb_append_bool(appender, value),
+			.Optional => return self.appendValue(if (value) |v| v else null, column),
 			.Pointer => |ptr| {
 				switch (ptr.size) {
-					.Slice => rc = try self.appendSlice(@as([]const ptr.child, value)),
+					.Slice => return self.appendSlice(vector, @as([]const ptr.child, value), row_index),
 					.One => switch (@typeInfo(ptr.child)) {
 						.Array => {
 							const Slice = []const std.meta.Elem(ptr.child);
-							rc = try self.appendSlice(@as(Slice, value));
+							return self.appendSlice(vector, @as(Slice, value), row_index);
 						},
-						else => appendTypeError(T),
+						else => appendError(T),
 					},
-					else => appendTypeError(T),
+					else => appendError(T),
 				}
 			},
-			.Array => try self.appendValue(&value),
-			.Optional => {
-				if (value) |v| {
-					try self.appendValue(v);
-				} else {
-					rc = c.duckdb_append_null(appender);
-				}
-			},
-			.Struct => {
-				if (T == Date) {
-					rc = c.duckdb_append_date(appender, c.duckdb_to_date(value));
-				} else if (T == Time) {
-					rc = c.duckdb_append_time(appender, c.duckdb_to_time(value));
-				} else if (T == Interval) {
-					rc = c.duckdb_append_interval(appender, value);
-				} else {
-					appendTypeError(T);
-				}
-			},
-			else => appendTypeError(T),
+			.Array => return self.appendValue(&value, column),
+			else => {},
 		}
 
-		if (rc == DuckDBError) {
-			return error.Bind;
+		switch (vector.data) {
+			.bool => |data| {
+				switch (type_info) {
+					.Bool => data[row_index] = value,
+					else => return self.appendTypeError(.bool, T)
+				}
+			},
+			.i8 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < -128 or value > 127) return self.appendIntRangeError(.i8);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.i8, T)
+				}
+			},
+			.i16 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < -32768 or value > 32767) return self.appendIntRangeError(.i16);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.i16, T)
+				}
+			},
+			.i32 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < -2147483648 or value > 2147483647) return self.appendIntRangeError(.i32);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.i32, T)
+				}
+			},
+			.i64 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError(.i64);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.i64, T)
+				}
+			},
+			.i128 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < -170141183460469231731687303715884105728 or value > 170141183460469231731687303715884105727) return self.appendIntRangeError(.i128);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.i128, T)
+				}
+			},
+			.u8 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < 0 or value > 255) return self.appendIntRangeError(.u8);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.u8, T)
+				}
+			},
+			.u16 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < 0 or value > 65535) return self.appendIntRangeError(.u16);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.u16, T)
+				}
+			},
+			.u32 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < 0 or value > 4294967295) return self.appendIntRangeError(.u32);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.u32, T)
+				}
+			},
+			.u64 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < 0 or value > 18446744073709551615) return self.appendIntRangeError(.u64);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.u64, T)
+				}
+			},
+			.u128 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < 0 or value > 340282366920938463463374607431768211455) return self.appendIntRangeError(.u128);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.u128, T)
+				}
+			},
+			.f32 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
+					.Float, .ComptimeFloat => data[row_index] = @floatCast(value),
+					else => return self.appendTypeError(.f32, T)
+				}
+			},
+			.f64 => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
+					.Float, .ComptimeFloat => data[row_index] = @floatCast(value),
+					else => return self.appendTypeError(.f64, T)
+				}
+			},
+			.date => |data| if (T == Date) {
+				data[row_index] = c.duckdb_to_date(value);
+			} else {
+				return self.appendTypeError(.date, T);
+			},
+			.time => |data| if (T == Time) {
+				data[row_index] = c.duckdb_to_time(value);
+			} else {
+				return self.appendTypeError(.time, T);
+			},
+			.interval => |data| if (T == Interval) {
+				data[row_index] = value;
+			} else {
+				return self.appendTypeError(.interval, T);
+			},
+			.timestamp => |data| {
+				switch (type_info) {
+					.Int, .ComptimeInt => {
+						if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError(.i64);
+						data[row_index] = @intCast(value);
+					},
+					else => return self.appendTypeError(.timestamp, T)
+				}
+			},
+			else => unreachable,
 		}
 	}
 
-	fn appendI64(self: *Appender, value: i64) !c_uint {
-		switch (try self.getType()) {
-			c.DUCKDB_TYPE_TIMESTAMP => return c.duckdb_append_timestamp(self.appender.*, .{.micros = value}),
-			else => return c.duckdb_append_int64(self.appender.*, value),
-		}
-	}
-
-	fn appendSlice(self: *Appender, value: anytype) !c_uint {
+	fn appendSlice(self: *Appender, vector: *Vector, value: anytype, row_index: usize) !void {
 		const T = @TypeOf(value);
 		if (T == []u8 or T == []const u8) {
-			// this slice is just a string, it maps to a duckdb text, not a list
-			return self.appendByteArray(value.ptr, value.len);
+			switch (vector.data_type) {
+				c.DUCKDB_TYPE_UUID => switch (vector.data) {
+					.uuid => |data| {
+						var n: i128 = 0;
+						if (value.len == 36) {
+							n = try uuidToInt(value);
+						} else if (value.len == 16) {
+							n = std.mem.readInt(i128, value[0..16], .big);
+						} else {
+							return error.InvalidUUID;
+						}
+						data[row_index] = n ^ (@as(i128, 1) << 127);
+					},
+					else => return self.appendTypeError(.i128, lib.UUID),
+				},
+				else => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
+			}
+			return;
 		}
 
-		// https://github.com/duckdb/duckdb/discussions/7482
-		// DuckDB doesn't expose an API for appending arrays.
-		appendTypeError(T);
+		// TODO
+		appendError(T);
 	}
 
-	fn appendByteArray(self: *Appender, value: [*c]const u8, len: usize) !c_uint {
-		const appender = self.appender.*;
-		switch (try self.getType()) {
-			c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_ENUM, c.DUCKDB_TYPE_INTERVAL, c.DUCKDB_TYPE_BIT => return c.duckdb_append_varchar_length(appender, value, len),
-			c.DUCKDB_TYPE_BLOB => return c.duckdb_append_blob(appender, @ptrCast(value), len),
-			c.DUCKDB_TYPE_UUID => {
-				if (len != 36) return DuckDBError;
-				return c.duckdb_append_varchar_length(appender, value, 36);
-			},
-			// this one is weird, but duckdb will return DUCKDB_TYPE_INVALID if it doesn't
-			// know the type, such as: "select $1", but binding will still work
-			c.DUCKDB_TYPE_INVALID => return c.duckdb_append_varchar_length(appender, value, len),
-			else => return DuckDBError,
+	fn appendTypeError(self: *Appender, comptime data_type: DataType, value_type: type) error{AppendError} {
+		self.err = "cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ @tagName(data_type);
+		return error.AppendError;
+	}
+
+	fn appendIntRangeError(self: *Appender, comptime data_type: DataType) error{AppendError} {
+		self.err = "integer is outside of range for a column of type " ++ @tagName(data_type);
+		return error.AppendError;
+	}
+};
+
+fn appendError(comptime T: type) void {
+	@compileError("cannot append value of type " ++ @typeName(T));
+}
+
+// The Vector is initially initialized with just its data_type and, in the case
+// of lists and struct, the empty children.  When a new data chunk is created
+// the Vector's underlying duckdb_vector and data pointer are initialized. This
+// allows us to re-use some parts of the Vector across multple data chunks.
+const Vector = struct {
+	data_type: c.duckdb_type,
+
+	// Only list and struct types have children vectors
+	children: []Vector = &[_]Vector{},
+
+
+	// initialized when a new data_chunk is created
+	vector: c.duckdb_vector = undefined,
+
+	// initialized when a new data_chunk is created, a typed pointer to the underlying
+	// vector data (which is a void * in C).
+	data: TypedData = undefined,
+
+	// initialized when we first try to set null, reset to null on each new chunk
+	validity: ?[*c]u64 = null,
+
+	fn init(logical_type: c.duckdb_logical_type, col: usize) !Vector {
+		_ = col;
+
+		const tp = c.duckdb_get_type_id(logical_type);
+		switch (tp) {
+			c.DUCKDB_TYPE_BOOLEAN,
+			c.DUCKDB_TYPE_TINYINT,
+			c.DUCKDB_TYPE_SMALLINT,
+			c.DUCKDB_TYPE_INTEGER,
+			c.DUCKDB_TYPE_BIGINT,
+			c.DUCKDB_TYPE_UTINYINT,
+			c.DUCKDB_TYPE_USMALLINT,
+			c.DUCKDB_TYPE_UINTEGER,
+			c.DUCKDB_TYPE_UBIGINT,
+			c.DUCKDB_TYPE_HUGEINT,
+			c.DUCKDB_TYPE_UHUGEINT,
+			c.DUCKDB_TYPE_FLOAT,
+			c.DUCKDB_TYPE_DOUBLE,
+			c.DUCKDB_TYPE_VARCHAR,
+			c.DUCKDB_TYPE_BLOB,
+			c.DUCKDB_TYPE_TIMESTAMP,
+			c.DUCKDB_TYPE_DATE,
+			c.DUCKDB_TYPE_TIME,
+			c.DUCKDB_TYPE_INTERVAL,
+			c.DUCKDB_TYPE_BIT,
+			c.DUCKDB_TYPE_TIME_TZ,
+			c.DUCKDB_TYPE_TIMESTAMP_TZ,
+			c.DUCKDB_TYPE_DECIMAL,
+			c.DUCKDB_TYPE_UUID,
+			c.DUCKDB_TYPE_ENUM => return .{.data_type = tp},
+			// c.DUCKDB_TYPE_LIST => .list,
+			else => return error.UnsupportedAppendColumnType,
 		}
 	}
 };
 
-fn appendTypeError(comptime T: type) void {
-	@compileError("cannot append value of type " ++ @typeName(T));
+const DataType = enum {
+	i8,
+	i16,
+	i32,
+	i64,
+	i128,
+	u128,
+	u8,
+	u16,
+	u32,
+	u64,
+	bool,
+	f32,
+	f64,
+	blob,
+	varchar,
+	date,
+	time,
+	timestamp,
+	interval,
+	uuid,
+};
+
+const TypedData = union(DataType) {
+	i8: [*c]i8,
+	i16: [*c]i16,
+	i32: [*c]i32,
+	i64: [*c]i64,
+	i128: [*c]i128,
+	u128: [*c]u128,
+	u8: [*c]u8,
+	u16: [*c]u16,
+	u32: [*c]u32,
+	u64: [*c]u64,
+	bool: [*c]bool,
+	f32: [*c]f32,
+	f64: [*c]f64,
+	blob: void,
+	varchar: void,
+	date: [*]c.duckdb_date,
+	time: [*]c.duckdb_time,
+	timestamp: [*]i64,
+	interval: [*]c.duckdb_interval,
+	uuid: [*c]i128,
+};
+
+fn uuidToInt	(hex: []const u8) !i128 {
+	var bin: [16]u8 = undefined;
+
+	std.debug.assert(hex.len == 36);
+	if (hex[8] != '-' or hex[13] != '-' or hex[18] != '-' or hex[23] != '-') {
+		return error.InvalidUUID;
+	}
+
+	inline for (encoded_pos, 0..) |i, j| {
+		const hi = hex_to_nibble[hex[i + 0]];
+		const lo = hex_to_nibble[hex[i + 1]];
+		if (hi == 0xff or lo == 0xff) {
+			return error.InvalidUUID;
+		}
+		bin[j] = hi << 4 | lo;
+	}
+	return std.mem.readInt(i128, &bin, .big);
 }
+
+const encoded_pos = [16]u8{ 0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34 };
+const hex_to_nibble = [_]u8{0xff} ** 48 ++ [_]u8{
+	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+	0x08, 0x09, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
+} ++ [_]u8{0xff} ** 152;
 
 const t = std.testing;
 const DB = lib.DB;
+test "Appender: bind errors" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table x (a integer)", .{});
+	{
+		var appender = try conn.appender(null, "x");
+		defer appender.deinit();
+		try t.expectError(error.AppendError, appender.appendRow(.{true}));
+		try t.expectEqualStrings("cannot bind a bool to a column of type i32", appender.err.?);
+	}
+
+	{
+		var appender = try conn.appender(null, "x");
+		defer appender.deinit();
+		try t.expectError(error.AppendError, appender.appendRow(.{9147483647}));
+		try t.expectEqualStrings("integer is outside of range for a column of type i32", appender.err.?);
+	}
+}
+
 test "Appender: basic types" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
@@ -211,9 +586,9 @@ test "Appender: basic types" {
 		\\   col_uinteger uinteger,
 		\\   col_ubigint ubigint,
 		\\   col_uhugeint uhugeint,
+		\\   col_bool bool,
 		\\   col_real real,
 		\\   col_double double,
-		\\   col_bool bool,
 		\\   col_text text,
 		\\   col_blob blob,
 		\\   col_uuid uuid,
@@ -221,58 +596,172 @@ test "Appender: basic types" {
 		\\   col_time time,
 		\\   col_interval interval,
 		\\   col_timestamp timestamp,
-		\\   col_integer_null integer null
+		\\ )
+	, .{});
+
+	{
+		var appender = try conn.appender(null, "x");
+		defer appender.deinit();
+		try appender.appendRow(.{
+			-128, -32768, -2147483648, -9223372036854775808, -170141183460469231731687303715884105728,
+			255, 65535, 4294967295, 18446744073709551615, 340282366920938463463374607431768211455,
+			true, -1.23, 1994.848288123, "over 9000!", &[_]u8{1, 2, 3, 254}, "34c667cd-638e-40c2-b256-0f78ccab7013",
+			Date{.year = 2023, .month = 5, .day = 10}, Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456},
+			Interval{.months = 3, .days = 7, .micros = 982810}, 1711506018088167,
+		});
+		try appender.flush();
+
+		try t.expectEqual(null, appender.err);
+
+		var row = (try conn.row("select * from x", .{})).?;
+		defer row.deinit();
+		try t.expectEqual(-128, row.get(i8, 0));
+		try t.expectEqual(-32768, row.get(i16, 1));
+		try t.expectEqual(-2147483648, row.get(i32, 2));
+		try t.expectEqual(-9223372036854775808, row.get(i64, 3));
+		try t.expectEqual(-170141183460469231731687303715884105728, row.get(i128, 4));
+		try t.expectEqual(255, row.get(u8, 5));
+		try t.expectEqual(65535, row.get(u16, 6));
+		try t.expectEqual(4294967295, row.get(u32, 7));
+		try t.expectEqual(18446744073709551615, row.get(u64, 8));
+		try t.expectEqual(340282366920938463463374607431768211455, row.get(u128, 9));
+		try t.expectEqual(true, row.get(bool, 10));
+		try t.expectEqual(-1.23, row.get(f32, 11));
+		try t.expectEqual(1994.848288123, row.get(f64, 12));
+		try t.expectEqualStrings("over 9000!", row.get([]u8, 13));
+		try t.expectEqualStrings(&[_]u8{1, 2, 3, 254}, row.get([]u8, 14));
+		try t.expectEqualStrings("34c667cd-638e-40c2-b256-0f78ccab7013", &row.get(lib.UUID, 15));
+		try t.expectEqual(Date{.year = 2023, .month = 5, .day = 10}, row.get(Date, 16));
+		try t.expectEqual(Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456}, row.get(Time, 17));
+		try t.expectEqual(Interval{.months = 3, .days = 7, .micros = 982810}, row.get(Interval, 18));
+		try t.expectEqual(1711506018088167, row.get(i64, 19));
+	}
+}
+
+test "Appender: basic variants" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec(
+		\\ create table x (
+		\\   id integer,
+		\\   col_bool bool,
+		\\   col_uuid uuid
 		\\ )
 	, .{});
 
 	var appender = try conn.appender(null, "x");
-	try appender.append(@as(i8, -128));
-	try appender.append(@as(i16, -32768));
-	try appender.append(@as(i32, -2147483648));
-	try appender.append(@as(i64, -9223372036854775808));
-	try appender.append(@as(i128, -170141183460469231731687303715884105728));
-	try appender.append(@as(u8, 255));
-	try appender.append(@as(u16, 65535));
-	try appender.append(@as(u32, 4294967295));
-	try appender.append(@as(u64, 18446744073709551615));
-	try appender.append(@as(u128, 340282366920938463463374607431768211455));
-	try appender.append(@as(f32, -1.23));
-	try appender.append(@as(f64, 1994.848288123));
-	try appender.append(true);
-	try appender.append("over 9000!");
-	try appender.append(&[_]u8{1, 2, 3, 254});
-	try appender.append("34c667cd-638e-40c2-b256-0f78ccab7013");
-	try appender.append(Date{.year = 2023, .month = 5, .day = 10});
-	try appender.append(Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456});
-	try appender.append(Interval{.months = 3, .days = 7, .micros = 982810});
-	try appender.append(1711506018088167);
-	try appender.append(null);
-	try appender.endRow();
+	defer appender.deinit();
+	try appender.appendRow(.{1, false, &[_]u8{0xf9,0x3b,0x64,0xe0,0x91,0x62,0x40,0xf5,0xaa,0xb8,0xa0,0x1f,0x5c,0xe9,0x90,0x32}});
+	try appender.appendRow(.{2, null, null});
+	try appender.flush();
 
-	try t.expectEqual(null, appender.err());
-	appender.deinit();
+	try t.expectEqual(null, appender.err);
 
-	var row = (try conn.row("select * from x", .{})).?;
-	defer row.deinit();
-	try t.expectEqual(-128, row.get(i8, 0));
-	try t.expectEqual(-32768, row.get(i16, 1));
-	try t.expectEqual(-2147483648, row.get(i32, 2));
-	try t.expectEqual(-9223372036854775808, row.get(i64, 3));
-	try t.expectEqual(-170141183460469231731687303715884105728, row.get(i128, 4));
-	try t.expectEqual(255, row.get(u8, 5));
-	try t.expectEqual(65535, row.get(u16, 6));
-	try t.expectEqual(4294967295, row.get(u32, 7));
-	try t.expectEqual(18446744073709551615, row.get(u64, 8));
-	try t.expectEqual(340282366920938463463374607431768211455, row.get(u128, 9));
-	try t.expectEqual(-1.23, row.get(f32, 10));
-	try t.expectEqual(1994.848288123, row.get(f64, 11));
-	try t.expectEqual(true, row.get(bool, 12));
-	try t.expectEqualStrings("over 9000!", row.get([]u8, 13));
-	try t.expectEqualStrings(&[_]u8{1, 2, 3, 254}, row.get([]u8, 14));
-	try t.expectEqualStrings("34c667cd-638e-40c2-b256-0f78ccab7013", &row.get(lib.UUID, 15));
-	try t.expectEqual(Date{.year = 2023, .month = 5, .day = 10}, row.get(Date, 16));
-	try t.expectEqual(Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456}, row.get(Time, 17));
-	try t.expectEqual(Interval{.months = 3, .days = 7, .micros = 982810}, row.get(Interval, 18));
-	try t.expectEqual(1711506018088167, row.get(i64, 19));
-	try t.expectEqual(null, row.get(?i64, 20));
+	{
+		var row = (try conn.row("select * from x where id = 1", .{})).?;
+		defer row.deinit();
+		try t.expectEqual(false, row.get(bool, 1));
+		try t.expectEqualStrings("f93b64e0-9162-40f5-aab8-a01f5ce99032", &row.get(lib.UUID, 2));
+	}
+
+	{
+		var row = (try conn.row("select * from x where id = 2", .{})).?;
+		defer row.deinit();
+		try t.expectEqual(null, row.get(?bool, 1));
+		try t.expectEqual(null, row.get(?lib.UUID, 2));
+	}
+}
+
+test "Appender: multiple chunks" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table x (a integer, b integer)", .{});
+
+	{
+		var appender = try conn.appender(null, "x");
+		defer appender.deinit();
+
+		for (0..1000) |i| {
+			appender.beginRow();
+			try appender.appendValue(i, 0);
+			if (@mod(i, 3) == 0) {
+				try appender.appendValue(null, 1);
+			} else {
+				try appender.appendValue(i * 2, 1);
+			}
+			try appender.endRow();
+		}
+		try appender.flush();
+	}
+
+	var rows = try conn.query("select * from x order by a", .{});
+	defer rows.deinit();
+
+	var i: i32 = 0;
+	while (try rows.next()) |row| {
+		try t.expectEqual(i, row.get(i32, 0));
+
+		if (@mod(i, 3) == 0) {
+			try t.expectEqual(null, row.get(?i32, 1));
+		} else {
+			try t.expectEqual(i*2, row.get(i32, 1));
+		}
+		i += 1;
+	}
+	try t.expectEqual(1000, i);
+}
+
+test "Appender: implicit and explicit flush" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table x (a integer)", .{});
+
+	{
+		var appender = try conn.appender(null, "x");
+		defer appender.deinit();
+
+		try appender.appendRow(.{0});
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.endRow();
+
+		try appender.flush();
+
+		for (2..5000) |i| {
+			appender.beginRow();
+			try appender.appendValue(i, 0);
+			try appender.endRow();
+		}
+
+		try appender.appendRow(.{5000});
+
+		appender.beginRow();
+		try appender.appendValue(5001, 0);
+		try appender.endRow();
+
+		try appender.flush();
+	}
+
+	var rows = try conn.query("select * from x order by a", .{});
+	defer rows.deinit();
+
+	var i: i32 = 0;
+	while (try rows.next()) |row| {
+		try t.expectEqual(i, row.get(i32, 0));
+		i += 1;
+	}
+	try t.expectEqual(5002, i);
 }
