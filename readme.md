@@ -345,3 +345,5 @@ The `appendRow()` call translates to the above, more explicit, dance.
 
 ## Type Support
 The appender only supports basic types. It does not support decimals or enums. Support for one-dimension lists is upcoming.
+
+Default values are [not supported](https://github.com/duckdb/duckdb/discussions/9158) by the appender. 
