@@ -21,21 +21,15 @@ pub const Interval = lib.Interval;
 pub const DataType = lib.DataType;
 
 pub fn StaticState(comptime N: usize) type {
-	const ColumnData = @import("column_data.zig").ColumnData;
+	const Vector = @import("vector.zig").Vector;
 	return struct {
-		columns: [N]lib.ColumnData = undefined,
-		column_types: [N]lib.c.duckdb_type = undefined,
+		vector: [N]Vector = undefined,
 
 		const Self = @This();
 
-		pub fn getColumns(self: *Self, count: usize) ![]ColumnData {
-			std.debug.assert(count == N);
-			return self.columns[0..count];
-		}
-
-		pub fn getColumnTypes(self: *Self, count: usize) ![]lib.c.duckdb_type {
-			std.debug.assert(count == N);
-			return self.column_types[0..count];
+		pub fn getVectors(self: *Self, count: usize) ![]Vector {
+			std.debug.assert(count <= N);
+			return self.vector[0..count];
 		}
 	};
 }

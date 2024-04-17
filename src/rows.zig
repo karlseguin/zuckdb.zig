@@ -3,8 +3,8 @@ const lib = @import("lib.zig");
 
 const c = lib.c;
 const Row = lib.Row;
+const Vector = lib.Vector;
 const DataType = lib.DataType;
-const ColumnData = lib.ColumnData;
 
 const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
@@ -36,11 +36,8 @@ pub const Rows = struct {
 	// The row index, within the current chunk
 	row_index: usize = 0,
 
-	// Vector data + validity for the current chunk
-	columns: []ColumnData = undefined,
-
-	// the type of each column, this is loaded once on init
-	column_types: []c.duckdb_type = undefined,
+	// Vector data + validity  + type info for the current chunk
+	vectors: []Vector = undefined,
 
 	// The duckdb gives us the enum name, but as a C string we need to free. This
 	// is potentially both expensive and awkward. We're going to intern the enums
@@ -72,6 +69,7 @@ pub const Rows = struct {
 				.chunk_count = 0,
 				.allocator = allocator,
 				.column_count = column_count,
+				.vectors = &[_]Vector{},
 				.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(undefined),
 			};
 		}
@@ -82,19 +80,24 @@ pub const Rows = struct {
 
 		const aa = arena.allocator();
 
-		var columns: []ColumnData = undefined;
-		var column_types: []c.duckdb_type = undefined;
+		var vectors: []Vector = undefined;
 
 		if (@TypeOf(state) == @TypeOf(null)) {
-			columns = try aa.alloc(ColumnData, column_count);
-			column_types = try aa.alloc(c.duckdb_type, column_count);
+			vectors = try aa.alloc(Vector, column_count);
 		} else {
-			columns = try state.getColumns(column_count);
-			column_types = try state.getColumnTypes(column_count);
+			vectors = try state.getVectors(column_count);
 		}
 
 		for (0..column_count) |i| {
-			column_types[i] = c.duckdb_column_type(result, i);
+			vectors[i] = .{
+				// loaded when we actually read a chunk
+				.data = undefined,
+				// loaded when we actually read a chunk
+				.validity = undefined,
+
+				// loaded once and re-used for each chunk
+				.type = try Vector.Type.init(aa, c.duckdb_column_logical_type(result, i)),
+			};
 		}
 
 		return .{
@@ -102,18 +105,20 @@ pub const Rows = struct {
 			._arena = arena,
 			.arena = aa,
 			.result = result,
-			.columns = columns,
 			.allocator = allocator,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
-			.column_types = column_types,
+			.vectors = vectors,
 			.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(aa),
 		};
 	}
 
 	pub fn deinit(self: Rows) void {
-		const allocator = self.allocator;
+		for (self.vectors) |*v| {
+			v.type.deinit();
+		}
 
+		const allocator = self.allocator;
 		{
 			const result = self.result;
 			c.duckdb_destroy_result(result);
@@ -162,7 +167,7 @@ pub const Rows = struct {
 
 		return .{
 			.index = row_index,
-			.columns = self.columns,
+			.vectors = self.vectors,
 		};
 	}
 
@@ -190,30 +195,18 @@ pub const Rows = struct {
 				continue;
 			}
 
-			var columns = self.columns;
-			const column_types = self.column_types;
+			var vectors = self.vectors;
 
 			for (0..column_count) |col| {
-				const column_type = column_types[col];
-				const vector = c.duckdb_data_chunk_get_vector(chunk, col);
+				const vector = &vectors[col];
+				const real_vector = c.duckdb_data_chunk_get_vector(chunk, col);
 
-				// we split up Scalar and Complex because, for now atleast, our container types
-				// (like lists) can only contain scalar types. So we need an explicit function
-				// for loading Scalar data which we can re-use for lists.
-				var data: ColumnData.Data = undefined;
-				if (generateScalarColumnData(self, vector, column_type)) |scalar| {
-					data = .{ .scalar = scalar };
-				} else {
-					if (generateContainerColumnData(self, vector, column_type)) |container| {
-						data = .{ .container = container };
-					} else {
-						return error.UnknownDataType;
-					}
-				}
-				columns[col] = ColumnData{
-					.data = data,
-					.validity = c.duckdb_vector_get_validity(vector),
+				vector.data = switch (vector.type) {
+					.list => |*l| .{.container = generateListData(l, real_vector)},
+					.scalar => |*s| .{.scalar = generateScalarData(s, real_vector)},
 				};
+
+				vector.validity = c.duckdb_vector_get_validity(real_vector);
 			}
 
 			self.chunk = chunk;
@@ -226,85 +219,75 @@ pub const Rows = struct {
 	}
 };
 
-fn generateScalarColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: usize) ?ColumnData.Scalar {
-	const raw_data = c.duckdb_vector_get_data(vector);
-	switch (column_type) {
-		c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => return .{ .blob = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_TINYINT => return .{ .i8 = @ptrCast(raw_data) },
-		c.DUCKDB_TYPE_SMALLINT => return .{ .i16 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_INTEGER => return .{ .i32 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_BIGINT => return .{ .i64 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID => return .{ .i128 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_UHUGEINT => return .{ .u128 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_UTINYINT => return .{ .u8 = @ptrCast(raw_data) },
-		c.DUCKDB_TYPE_USMALLINT => return .{ .u16 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_UINTEGER => return .{ .u32 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_UBIGINT => return .{ .u64 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_BOOLEAN => return .{ .bool = @ptrCast(raw_data) },
-		c.DUCKDB_TYPE_FLOAT => return .{ .f32 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_DOUBLE => return .{ .f64 = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_DATE => return .{ .date = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_TIME => return .{ .time = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_TIMESTAMP => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_TIMESTAMP_TZ => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_INTERVAL => return .{ .interval = @ptrCast(@alignCast(raw_data)) },
-		c.DUCKDB_TYPE_DECIMAL => {
-			// decimal's storage is based on the width
-			var logical_type = c.duckdb_vector_get_column_type(vector);
-			defer c.duckdb_destroy_logical_type(&logical_type);
-
-			const scale = c.duckdb_decimal_scale(logical_type);
-			const width = c.duckdb_decimal_width(logical_type);
-			const internal: ColumnData.Decimal.Internal = switch (c.duckdb_decimal_internal_type(logical_type)) {
-				c.DUCKDB_TYPE_SMALLINT => .{ .i16 = @ptrCast(@alignCast(raw_data)) },
-				c.DUCKDB_TYPE_INTEGER => .{ .i32 = @ptrCast(@alignCast(raw_data)) },
-				c.DUCKDB_TYPE_BIGINT => .{ .i64 = @ptrCast(@alignCast(raw_data)) },
-				c.DUCKDB_TYPE_HUGEINT => .{ .i128 = @ptrCast(@alignCast(raw_data)) },
-				else => unreachable,
-			};
-			return .{ .decimal = .{ .width = width, .scale = scale, .internal = internal } };
-		},
-		c.DUCKDB_TYPE_ENUM => {
-			const logical_type = c.duckdb_vector_get_column_type(vector);
-			const internal_type = c.duckdb_enum_internal_type(logical_type);
-			return .{
-				.@"enum" = .{
-					.rows = rows,
-					.logical_type = logical_type,
-					.internal = switch (internal_type) {
-						c.DUCKDB_TYPE_UTINYINT => .{ .u8 = @ptrCast(raw_data) },
-						c.DUCKDB_TYPE_USMALLINT => .{ .u16 = @ptrCast(@alignCast(raw_data)) },
-						c.DUCKDB_TYPE_UINTEGER => .{ .u32 = @ptrCast(@alignCast(raw_data)) },
-						c.DUCKDB_TYPE_UBIGINT => .{ .u64 = @ptrCast(@alignCast(raw_data)) },
-						else => @panic("Unsupported enum internal storage type"), // I don't think this can happen, but if it can, I want to know about it
-					},
+fn generateScalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.Scalar {
+	const raw_data = c.duckdb_vector_get_data(real_vector);
+	switch (scalar_type.*) {
+		.@"enum" => |*e| {
+			return .{.@"enum" = .{
+				.cache = &e.cache,
+				.logical_type = e.logical_type,
+				.internal = switch (e.type) {
+					.u8 => .{ .u8 = @ptrCast(raw_data) },
+					.u16 => .{ .u16 = @ptrCast(@alignCast(raw_data)) },
+					.u32 => .{ .u32 = @ptrCast(@alignCast(raw_data)) },
+					.u64 => .{ .u64 = @ptrCast(@alignCast(raw_data)) },
 				},
-			};
+			}};
 		},
-		else => return null,
+		.decimal => |d| {
+			return .{.decimal = .{
+				.width = d.width,
+				.scale = d.scale,
+				.internal = switch (d.type) {
+					.i16 => .{ .i16 = @ptrCast(@alignCast(raw_data)) },
+					.i32 => .{ .i32 = @ptrCast(@alignCast(raw_data)) },
+					.i64 => .{ .i64 = @ptrCast(@alignCast(raw_data)) },
+					.i128 => .{ .i128 = @ptrCast(@alignCast(raw_data)) },
+				},
+			}};
+		},
+		.simple => |s| switch (s) {
+			c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => return .{ .blob = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_TINYINT => return .{ .i8 = @ptrCast(raw_data) },
+			c.DUCKDB_TYPE_SMALLINT => return .{ .i16 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_INTEGER => return .{ .i32 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_BIGINT => return .{ .i64 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID => return .{ .i128 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_UHUGEINT => return .{ .u128 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_UTINYINT => return .{ .u8 = @ptrCast(raw_data) },
+			c.DUCKDB_TYPE_USMALLINT => return .{ .u16 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_UINTEGER => return .{ .u32 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_UBIGINT => return .{ .u64 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_BOOLEAN => return .{ .bool = @ptrCast(raw_data) },
+			c.DUCKDB_TYPE_FLOAT => return .{ .f32 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_DOUBLE => return .{ .f64 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_DATE => return .{ .date = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_TIME => return .{ .time = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_TIMESTAMP => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_TIMESTAMP_TZ => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_INTERVAL => return .{ .interval = @ptrCast(@alignCast(raw_data)) },
+			else => unreachable,
+		}
 	}
 }
 
-fn generateContainerColumnData(rows: *Rows, vector: c.duckdb_vector, column_type: usize) ?ColumnData.Container {
-	const raw_data = c.duckdb_vector_get_data(vector);
-	switch (column_type) {
-		c.DUCKDB_TYPE_LIST => {
-			const child_vector = c.duckdb_list_vector_get_child(vector);
-			var logical_type = c.duckdb_vector_get_column_type(child_vector);
-			defer c.duckdb_destroy_logical_type(&logical_type);
+fn generateListData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.Container {
+	const raw_data = c.duckdb_vector_get_data(real_vector);
 
-			const child_type = c.duckdb_get_type_id(logical_type);
-			const child_data = generateScalarColumnData(rows, child_vector, child_type) orelse return null;
-			const child_validity = c.duckdb_vector_get_validity(child_vector);
-			return .{.list = .{
-				.child = child_data,
-				.validity = child_validity,
-				.entries = @ptrCast(@alignCast(raw_data)),
-				.type = DataType.fromDuckDBType(child_type),
-			}};
+	const child_vector = c.duckdb_list_vector_get_child(real_vector);
+	const child_data = generateScalarData(child_type, child_vector);
+	const child_validity = c.duckdb_vector_get_validity(child_vector);
+
+	return .{.list = .{
+		.child = child_data,
+		.validity = child_validity,
+		.entries = @ptrCast(@alignCast(raw_data)),
+		.type = switch (child_type.*) {
+			.@"enum" => c.DUCKDB_TYPE_ENUM,
+			.decimal => c.DUCKDB_TYPE_DECIMAL,
+			.simple => |s| s,
 		},
-		else => return null,
-	}
+	}};
 }
 
 const t = std.testing;

@@ -5,7 +5,7 @@ const lib = @import("lib.zig");
 const c = lib.c;
 const DB = lib.DB;
 const Rows = lib.Rows;
-const ColumnData = lib.ColumnData;
+const Vector = lib.Vector;
 
 const UUID = lib.UUID;
 const Time = lib.Time;
@@ -17,24 +17,24 @@ const Allocator = std.mem.Allocator;
 
 pub const Row = struct {
 	index: usize,
-	columns: []ColumnData,
+	vectors: []Vector,
 
 	pub fn get(self: Row, comptime T: type, col: usize) T {
 		const index = self.index;
-		const column = self.columns[col];
+		const vector = self.vectors[col];
 
 		const TT = switch (@typeInfo(T)) {
 			.Optional => |opt| blk: {
-				if (_isNull(column.validity, index)) return null;
+				if (_isNull(vector.validity, index)) return null;
 				break :blk opt.child;
 			},
 			else => blk: {
-				lib.assert(_isNull(column.validity, index) == false);
+				lib.assert(_isNull(vector.validity, index) == false);
 				break :blk T;
 			},
 		};
 
-		switch (column.data) {
+		switch (vector.data) {
 			.scalar => |scalar| return getScalar(TT, scalar, index, col),
 			else => unreachable,
 		}
@@ -42,31 +42,31 @@ pub const Row = struct {
 
 	pub fn list(self: Row, comptime T: type, col: usize) ?List(T) {
 		const index = self.index;
-		const column = self.columns[col];
-		if (_isNull(column.validity, index)) return null;
+		const vector = self.vectors[col];
+		if (_isNull(vector.validity, index)) return null;
 
-		const vc = column.data.container.list;
+		const vc = vector.data.container.list;
 		const entry = vc.entries[index];
 		return List(T).init(col, vc.child, vc.validity, entry.offset, entry.length);
 	}
 
 	pub fn lazyList(self: Row, col: usize) ?LazyList {
 		const index = self.index;
-		const column = self.columns[col];
-		if (_isNull(column.validity, index)) return null;
+		const vector = self.vectors[col];
+		if (_isNull(vector.validity, index)) return null;
 
-		const vc = column.data.container.list;
+		const vc = vector.data.container.list;
 		const entry = vc.entries[index];
-		return LazyList.init(col, vc.type, vc.child, vc.validity, entry.offset, entry.length);
+		return LazyList.init(col, vc.child, vc.validity, entry.offset, entry.length);
 	}
 
 	pub fn listItemType(self: Row, col: usize) DataType {
 		// (⌐■_■)
-		return self.columns[col].data.container.list.type;
+		return lib.DataType.fromDuckDBType(self.vectors[col].data.container.list.type);
 	}
 
 	pub fn isNull(self: Row, col: usize) bool {
-		return _isNull(self.columns[col].validity, self.index);
+		return _isNull(self.vectors[col].validity, self.index);
 	}
 };
 
@@ -92,22 +92,23 @@ pub const OwningRow = struct {
 pub const Enum = struct {
 	idx: usize,
 	_col: usize,
-	_rows: *Rows,
 	_logical_type: c.duckdb_logical_type,
+	_cache: *std.AutoHashMap(u64, []const u8),
 
 	pub fn rowCache(self: Enum) ![]const u8 {
-		const rows = self._rows;
-		var gop1 = try rows.enum_name_cache.getOrPut(self._col);
-		if (!gop1.found_existing) {
-			gop1.value_ptr.* = std.AutoHashMap(u64, []const u8).init(rows.arena);
+		const gop = try self._cache.getOrPut(self.idx);
+		if (gop.found_existing) {
+			return gop.value_ptr.*;
 		}
 
-		const gop2 = try gop1.value_ptr.getOrPut(self.idx);
-		if (!gop2.found_existing) {
-			const string_value = c.duckdb_enum_dictionary_value(self._logical_type, self.idx);
-			gop2.value_ptr.* = try rows.arena.dupe(u8, std.mem.span(string_value));
-		}
-		return gop2.value_ptr.*;
+		const string_value = c.duckdb_enum_dictionary_value(self._logical_type, self.idx);
+
+		// Using self._cache.allocator is pretty bad. I _know_ this is the rows
+		// ArenaAllocator, so it's right, but it is  ugly and error prone should
+		// anything ever change
+		const value = try self._cache.allocator.dupe(u8, std.mem.span(string_value));
+		gop.value_ptr.* = value;
+		return value;
 	}
 
 	pub fn raw(self: Enum) [*c]const u8 {
@@ -121,11 +122,11 @@ pub fn List(comptime T: type) type {
 		col: usize,
 		_validity: [*c]u64,
 		_offset: usize,
-		_scalar: ColumnData.Scalar,
+		_scalar: Vector.Scalar,
 
 		const Self = @This();
 
-		fn init(col: usize, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
+		fn init(col: usize, scalar: Vector.Scalar, validity: [*c]u64, offset: usize, length: usize) Self {
 			return .{
 				.col = col,
 				.len = length,
@@ -171,16 +172,14 @@ pub fn List(comptime T: type) type {
 pub const LazyList = struct {
 	len: usize,
 	col: usize,
-	type: DataType,
 	_validity: [*c]u64,
 	_offset: usize,
-	_scalar: ColumnData.Scalar,
+	_scalar: Vector.Scalar,
 
-	fn init(col: usize, data_type: DataType, scalar: ColumnData.Scalar, validity: [*c]u64, offset: usize, length: usize) LazyList {
+	fn init(col: usize, scalar: Vector.Scalar, validity: [*c]u64, offset: usize, length: usize) LazyList {
 		return .{
 			.col = col,
 			.len = length,
-			.type = data_type,
 			._offset = offset,
 			._scalar = scalar,
 			._validity = validity,
@@ -214,7 +213,7 @@ inline fn _isNull(validity: [*c]u64, index: usize) bool {
 	return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
 }
 
-fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize, col: usize) T {
+fn getScalar(comptime T: type, scalar: Vector.Scalar, index: usize, col: usize) T {
 	switch (T) {
 		[]u8, []const u8 => return getBlob(scalar, index),
 		i8 => return scalar.i8[index],
@@ -257,7 +256,7 @@ fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize, col: usi
 					inline else => |internal| internal[index],
 				},
 				._col = col,
-				._rows = e.rows,
+				._cache = e.cache,
 				._logical_type = e.logical_type,
 			};
 		},
@@ -266,7 +265,7 @@ fn getScalar(comptime T: type, scalar: ColumnData.Scalar, index: usize, col: usi
 	}
 }
 
-fn getBlob(scalar: ColumnData.Scalar, index: usize) []u8 {
+fn getBlob(scalar: Vector.Scalar, index: usize) []u8 {
 	switch (scalar) {
 		.blob => |vc| {
 			// This sucks. This is an untagged union. But both versions (inlined and pointer)
@@ -287,7 +286,7 @@ fn getBlob(scalar: ColumnData.Scalar, index: usize) []u8 {
 }
 
 // largely taken from duckdb's uuid type
-fn getUUID(scalar: ColumnData.Scalar, index: usize) UUID {
+fn getUUID(scalar: Vector.Scalar, index: usize) UUID {
 	const hex = "0123456789abcdef";
 	const n = scalar.i128[index];
 
@@ -647,7 +646,6 @@ test "read list" {
 
 		var row = (try rows.next()) orelse unreachable;
 		const list = row.lazyList(0).?;
-		try t.expectEqual(.varchar, list.type);
 		try t.expectEqual(3, list.len);
 		try t.expectEqualStrings("tag1", list.get([]const u8, 0));
 		try t.expectEqual(null, list.get(?[]const u8, 1));

@@ -12,8 +12,8 @@ pub const Rows = @import("rows.zig").Rows;
 pub const Pool = @import("pool.zig").Pool;
 pub const Stmt = @import("stmt.zig").Stmt;
 pub const Conn = @import("conn.zig").Conn;
+pub const Vector = @import("vector.zig").Vector;
 pub const Appender = @import("appender.zig").Appender;
-pub const ColumnData = @import("column_data.zig").ColumnData;
 
 pub const Date = c.duckdb_date_struct;
 pub const Time = c.duckdb_time_struct;
