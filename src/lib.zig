@@ -168,6 +168,31 @@ fn isStringArray(comptime T: type) bool {
 	}
 }
 
+pub const TINYINT_MIN = -128;
+pub const TINYINT_MAX = 127;
+pub const UTINYINT_MIN = 0;
+pub const UTINYINT_MAX = 255;
+
+pub const SMALLINT_MIN = -32768;
+pub const SMALLINT_MAX = 32767;
+pub const USMALLINT_MIN = 0;
+pub const USMALLINT_MAX = 65535;
+
+pub const INTEGER_MIN = -2147483648;
+pub const INTEGER_MAX = 2147483647;
+pub const UINTEGER_MIN = 0;
+pub const UINTEGER_MAX = 4294967295;
+
+pub const BIGINT_MIN = -9223372036854775808;
+pub const BIGINT_MAX = 9223372036854775807;
+pub const UBIGINT_MIN = 0;
+pub const UBIGINT_MAX = 18446744073709551615;
+
+pub const HUGEINT_MIN = -170141183460469231731687303715884105728;
+pub const HUGEINT_MAX = 170141183460469231731687303715884105727;
+pub const UHUGEINT_MIN = 0;
+pub const UHUGEINT_MAX = 340282366920938463463374607431768211455;
+
 
 const root = @import("root");
 const _assert = blk: {

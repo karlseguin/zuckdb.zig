@@ -328,7 +328,7 @@ try appender.flush();
 
 The order of the values used in `appendRow` is the order of the columns as they are defined in the table (e.g. the order that `describe $table` returns).
 
-## Alterative API
+## Appender per-column append
 The `appender.appendRow` function depends on the fact that you comptime knowledge of the underlying table. If you are dealing with dynamic (e.g. user-defined) schemas, that won't always be the case. Instead, use the more explicit `beginRow()`, `appendValue()` and `endRow()` calls. When using this api. When using this API, it isn't necessary to call `flush` (but you can if you want).
 
 ```zig
@@ -343,7 +343,13 @@ for (...) {
 
 The `appendRow()` call translates to the above, more explicit, dance.
 
-## Type Support
-The appender only supports basic types. It does not support decimals or enums. Support for one-dimension lists is upcoming.
+## Appender Type Support
+The appender supports the same basic types as the rest of the library.
 
-Default values are [not supported](https://github.com/duckdb/duckdb/discussions/9158) by the appender. 
+Enums aren't supporting, due to [limitations in the DuckDB C API](https://github.com/duckdb/duckdb/pull/11704).
+
+One-dimension lists are upcoming.
+
+Decimals are supported, but take care. When appending a float, the value will truncated to the decimal place specified by the scale of the column (i.e. a decimal(8, 3) will have the float truncated with 3 decimal places). When appending an int, the library assumes that you have already converted the decimal to the DuckDB internal representation. While surprising, this provides callers with precise control.
+
+Default values are [not supported](https://github.com/duckdb/duckdb/discussions/9158) by the appender. You should append a value for every column.

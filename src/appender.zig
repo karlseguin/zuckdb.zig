@@ -60,8 +60,8 @@ pub const Appender = struct {
 				.list => {},
 				.scalar => |scalar| switch (scalar) {
 					.simple => {},
+					.decimal => {},
 					.@"enum" => return error.CannotAppendToEnum,
-					.decimal => return error.CannotAppendToDecimal,
 				},
 			}
 		}
@@ -211,7 +211,7 @@ pub const Appender = struct {
 				.i8 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < -128 or value > 127) return self.appendIntRangeError("tinyint");
+							if (value < lib.TINYINT_MIN or value > lib.TINYINT_MAX) return self.appendIntRangeError("tinyint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("tinyint", T)
@@ -220,7 +220,7 @@ pub const Appender = struct {
 				.i16 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < -32768 or value > 32767) return self.appendIntRangeError("smallint");
+							if (value < lib.SMALLINT_MIN or value > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("smallint", T)
@@ -229,7 +229,7 @@ pub const Appender = struct {
 				.i32 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < -2147483648 or value > 2147483647) return self.appendIntRangeError("integer");
+							if (value < lib.INTEGER_MIN or value > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("integer", T)
@@ -238,7 +238,7 @@ pub const Appender = struct {
 				.i64 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError("bigint");
+							if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("bigint", T)
@@ -247,7 +247,7 @@ pub const Appender = struct {
 				.i128 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < -170141183460469231731687303715884105728 or value > 170141183460469231731687303715884105727) return self.appendIntRangeError("hugeint");
+							if (value < lib.HUGEINT_MIN or value > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("hugeint", T)
@@ -256,7 +256,7 @@ pub const Appender = struct {
 				.u8 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < 0 or value > 255) return self.appendIntRangeError("utinyint");
+							if (value < lib.UTINYINT_MIN or value > lib.UTINYINT_MAX) return self.appendIntRangeError("utinyint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("utinyint", T)
@@ -265,7 +265,7 @@ pub const Appender = struct {
 				.u16 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < 0 or value > 65535) return self.appendIntRangeError("usmallint");
+							if (value < lib.USMALLINT_MIN or value > lib.USMALLINT_MAX) return self.appendIntRangeError("usmallint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("usmallint", T)
@@ -274,7 +274,7 @@ pub const Appender = struct {
 				.u32 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < 0 or value > 4294967295) return self.appendIntRangeError("uinteger");
+							if (value < lib.UINTEGER_MIN or value > lib.UINTEGER_MAX) return self.appendIntRangeError("uinteger");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("uinteger", T)
@@ -283,7 +283,7 @@ pub const Appender = struct {
 				.u64 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < 0 or value > 18446744073709551615) return self.appendIntRangeError("ubingint");
+							if (value < lib.UBIGINT_MIN or value > lib.UBIGINT_MAX) return self.appendIntRangeError("ubingint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("ubingint", T)
@@ -292,7 +292,7 @@ pub const Appender = struct {
 				.u128 => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < 0 or value > 340282366920938463463374607431768211455) return self.appendIntRangeError("uhugeint");
+							if (value < lib.UHUGEINT_MIN or value > lib.UHUGEINT_MAX) return self.appendIntRangeError("uhugeint");
 							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("uhugeint", T)
@@ -330,11 +330,68 @@ pub const Appender = struct {
 				.timestamp => |data| {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
-							if (value < -9223372036854775808 or value > 9223372036854775807) return self.appendIntRangeError("i64");
+							if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("i64");
 							data[row_index] = .{.micros = @intCast(value)};
 						},
 						else => return self.appendTypeError("timestamp", T)
 					}
+				},
+				.decimal => |d| switch (type_info) {
+					.Int, .ComptimeInt => switch (d.internal) {
+						.i16 => |data| {
+							if (value < lib.SMALLINT_MIN or value > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
+							data[row_index] = @intCast(value);
+						},
+						.i32 => |data| {
+							if (value < lib.INTEGER_MIN or value > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
+							data[row_index] = @intCast(value);
+						},
+						.i64 => |data| {
+							if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
+							data[row_index] = @intCast(value);
+						},
+						.i128 => |data| {
+							if (value < lib.HUGEINT_MIN or value > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
+							data[row_index] = @intCast(value);
+						},
+					},
+					.Float, .ComptimeFloat => {
+						// YES, there's a lot of duplication going on. But, I don't think the float and int codepaths can be merged
+						// without forcing int value to an i128, which seems wasteful to me.
+						const huge: i128 = switch (vector.type.scalar.decimal.scale) {
+							0 => @intFromFloat(value),
+							1 => @intFromFloat(value * 10),
+							2 => @intFromFloat(value * 100),
+							3 => @intFromFloat(value * 1000),
+							4 => @intFromFloat(value * 10000),
+							5 => @intFromFloat(value * 100000),
+							6 => @intFromFloat(value * 1000000),
+							7 => @intFromFloat(value * 10000000),
+							8 => @intFromFloat(value * 100000000),
+							9 => @intFromFloat(value * 1000000000),
+							10 => @intFromFloat(value * 10000000000),
+							else => |n| @intFromFloat(value * std.math.pow(f64, 10, @floatFromInt(n))),
+						};
+						switch (d.internal) {
+							.i16 => |data| {
+								if (huge < lib.SMALLINT_MIN or huge > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
+								data[row_index] = @intCast(huge);
+							},
+							.i32 => |data| {
+								if (huge < lib.INTEGER_MIN or huge > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
+								data[row_index] = @intCast(huge);
+							},
+							.i64 => |data| {
+								if (huge < lib.BIGINT_MIN or huge > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
+								data[row_index] = @intCast(huge);
+							},
+							.i128 => |data| {
+								if (huge < lib.HUGEINT_MIN or huge > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
+								data[row_index] = @intCast(huge);
+							},
+						}
+					},
+					else => return self.appendTypeError("decimal", T)
 				},
 				else => unreachable,
 			}
@@ -388,106 +445,6 @@ pub const Appender = struct {
 fn appendError(comptime T: type) void {
 	@compileError("cannot append value of type " ++ @typeName(T));
 }
-
-// // The Vector is initially initialized with just its data_type and, in the case
-// // of lists and struct, the empty children.  When a new data chunk is created
-// // the Vector's underlying duckdb_vector and data pointer are initialized. This
-// // allows us to re-use some parts of the Vector across multple data chunks.
-// const Vector = struct {
-// 	data_type: c.duckdb_type,
-
-// 	// initialized when a new data_chunk is created
-// 	vector: c.duckdb_vector = undefined,
-
-// 	// initialized when a new data_chunk is created, a typed pointer to the underlying
-// 	// vector data (which is a void * in C).
-// 	data: TypedData = undefined,
-
-// 	// initialized when we first try to set null, reset to null on each new chunk
-// 	validity: ?[*c]u64 = null,
-
-// 	fn init(logical_type: c.duckdb_logical_type, col: usize) !Vector {
-// 		_ = col;
-
-// 		const tp = c.duckdb_get_type_id(logical_type);
-// 		switch (tp) {
-// 			c.DUCKDB_TYPE_BOOLEAN,
-// 			c.DUCKDB_TYPE_TINYINT,
-// 			c.DUCKDB_TYPE_SMALLINT,
-// 			c.DUCKDB_TYPE_INTEGER,
-// 			c.DUCKDB_TYPE_BIGINT,
-// 			c.DUCKDB_TYPE_UTINYINT,
-// 			c.DUCKDB_TYPE_USMALLINT,
-// 			c.DUCKDB_TYPE_UINTEGER,
-// 			c.DUCKDB_TYPE_UBIGINT,
-// 			c.DUCKDB_TYPE_HUGEINT,
-// 			c.DUCKDB_TYPE_UHUGEINT,
-// 			c.DUCKDB_TYPE_FLOAT,
-// 			c.DUCKDB_TYPE_DOUBLE,
-// 			c.DUCKDB_TYPE_VARCHAR,
-// 			c.DUCKDB_TYPE_BLOB,
-// 			c.DUCKDB_TYPE_TIMESTAMP,
-// 			c.DUCKDB_TYPE_DATE,
-// 			c.DUCKDB_TYPE_TIME,
-// 			c.DUCKDB_TYPE_INTERVAL,
-// 			c.DUCKDB_TYPE_BIT,
-// 			c.DUCKDB_TYPE_TIME_TZ,
-// 			c.DUCKDB_TYPE_TIMESTAMP_TZ,
-// 			c.DUCKDB_TYPE_DECIMAL,
-// 			c.DUCKDB_TYPE_UUID,
-// 			c.DUCKDB_TYPE_ENUM => return .{.data_type = tp},
-// 			// c.DUCKDB_TYPE_LIST => .list,
-// 			else => return error.UnsupportedAppendColumnType,
-// 		}
-// 	}
-// };
-
-// const DataType = enum {
-// 	i8,
-// 	i16,
-// 	i32,
-// 	i64,
-// 	i128,
-// 	u128,
-// 	u8,
-// 	u16,
-// 	u32,
-// 	u64,
-// 	bool,
-// 	f32,
-// 	f64,
-// 	blob,
-// 	varchar,
-// 	date,
-// 	time,
-// 	timestamp,
-// 	interval,
-// 	uuid,
-// };
-
-// const TypedData = union(DataType) {
-// 	i8: [*c]i8,
-// 	i16: [*c]i16,
-// 	i32: [*c]i32,
-// 	i64: [*c]i64,
-// 	i128: [*c]i128,
-// 	u128: [*c]u128,
-// 	u8: [*c]u8,
-// 	u16: [*c]u16,
-// 	u32: [*c]u32,
-// 	u64: [*c]u64,
-// 	bool: [*c]bool,
-// 	f32: [*c]f32,
-// 	f64: [*c]f64,
-// 	blob: void,
-// 	varchar: void,
-// 	date: [*]c.duckdb_date,
-// 	time: [*]c.duckdb_time,
-// 	timestamp: [*]i64,
-// 	interval: [*]c.duckdb_interval,
-// 	uuid: [*c]i128,
-// 	list: [*c]cduckdb_list_entry,
-// };
 
 fn uuidToInt(hex: []const u8) !i128 {
 	var bin: [16]u8 = undefined;
@@ -544,7 +501,7 @@ test "Appender: bind errors" {
 	}
 }
 
-test "Appender: simple types" {
+test "CannotAppendToDecimal" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
@@ -573,6 +530,7 @@ test "Appender: simple types" {
 		\\   col_time time,
 		\\   col_interval interval,
 		\\   col_timestamp timestamp,
+		\\   col_decimal decimal(18, 6),
 		\\ )
 	, .{});
 
@@ -580,11 +538,11 @@ test "Appender: simple types" {
 		var appender = try conn.appender(null, "x");
 		defer appender.deinit();
 		try appender.appendRow(.{
-			-128, -32768, -2147483648, -9223372036854775808, -170141183460469231731687303715884105728,
-			255, 65535, 4294967295, 18446744073709551615, 340282366920938463463374607431768211455,
+			-128, lib.SMALLINT_MIN, lib.INTEGER_MIN, lib.BIGINT_MIN, lib.HUGEINT_MIN,
+			lib.UTINYINT_MAX, lib.USMALLINT_MAX, lib.UINTEGER_MAX, lib.UBIGINT_MAX, lib.UHUGEINT_MAX,
 			true, -1.23, 1994.848288123, "over 9000!", &[_]u8{1, 2, 3, 254}, "34c667cd-638e-40c2-b256-0f78ccab7013",
 			Date{.year = 2023, .month = 5, .day = 10}, Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456},
-			Interval{.months = 3, .days = 7, .micros = 982810}, 1711506018088167
+			Interval{.months = 3, .days = 7, .micros = 982810}, 1711506018088167, 39858392.36212
 		});
 		try appender.flush();
 
@@ -593,15 +551,15 @@ test "Appender: simple types" {
 		var row = (try conn.row("select * from x", .{})).?;
 		defer row.deinit();
 		try t.expectEqual(-128, row.get(i8, 0));
-		try t.expectEqual(-32768, row.get(i16, 1));
-		try t.expectEqual(-2147483648, row.get(i32, 2));
-		try t.expectEqual(-9223372036854775808, row.get(i64, 3));
-		try t.expectEqual(-170141183460469231731687303715884105728, row.get(i128, 4));
-		try t.expectEqual(255, row.get(u8, 5));
-		try t.expectEqual(65535, row.get(u16, 6));
-		try t.expectEqual(4294967295, row.get(u32, 7));
-		try t.expectEqual(18446744073709551615, row.get(u64, 8));
-		try t.expectEqual(340282366920938463463374607431768211455, row.get(u128, 9));
+		try t.expectEqual(lib.SMALLINT_MIN, row.get(i16, 1));
+		try t.expectEqual(lib.INTEGER_MIN, row.get(i32, 2));
+		try t.expectEqual(lib.BIGINT_MIN, row.get(i64, 3));
+		try t.expectEqual(lib.HUGEINT_MIN, row.get(i128, 4));
+		try t.expectEqual(lib.UTINYINT_MAX, row.get(u8, 5));
+		try t.expectEqual(lib.USMALLINT_MAX, row.get(u16, 6));
+		try t.expectEqual(lib.UINTEGER_MAX, row.get(u32, 7));
+		try t.expectEqual(lib.UBIGINT_MAX, row.get(u64, 8));
+		try t.expectEqual(lib.UHUGEINT_MAX, row.get(u128, 9));
 		try t.expectEqual(true, row.get(bool, 10));
 		try t.expectEqual(-1.23, row.get(f32, 11));
 		try t.expectEqual(1994.848288123, row.get(f64, 12));
@@ -612,6 +570,7 @@ test "Appender: simple types" {
 		try t.expectEqual(Time{.hour = 21, .min = 4, .sec = 49, .micros = 123456}, row.get(Time, 17));
 		try t.expectEqual(Interval{.months = 3, .days = 7, .micros = 982810}, row.get(Interval, 18));
 		try t.expectEqual(1711506018088167, row.get(i64, 19));
+		try t.expectEqual(39858392.36212, row.get(f64, 20));
 	}
 }
 
@@ -761,7 +720,6 @@ test "Appender: hugeint" {
 
 		const random = prng.random();
 
-
 		var appender = try conn.appender(null, "x");
 		defer appender.deinit();
 
@@ -783,3 +741,110 @@ test "Appender: hugeint" {
 	}
 	try t.expectEqual(COUNT, i);
 }
+
+test "Appender: decimal" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table appdec (id integer, d decimal(8, 4))", .{});
+
+	{
+		var appender = try conn.appender(null, "appdec");
+		defer appender.deinit();
+		try appender.appendRow(.{1, 12345678});
+		try appender.flush();
+
+		var row = (try conn.row("select d from appdec where id = 1", .{})).?;
+		defer row.deinit();
+		try t.expectEqual(1234.5678, row.get(f64, 0));
+	}
+
+	{
+		var appender = try conn.appender(null, "appdec");
+		defer appender.deinit();
+		try appender.appendRow(.{2, 5323.224});
+		try appender.flush();
+
+		var row = (try conn.row("select d from appdec where id = 2", .{})).?;
+		defer row.deinit();
+		try t.expectEqual(5323.224, row.get(f64, 0));
+	}
+}
+
+test "Appender: decimal fuzz" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table appdec (d1 decimal(3, 1), d2 decimal(9, 3), d3 decimal(17, 5), d4 decimal(30, 10))", .{});
+
+	const COUNT = 1000;
+	var expected_i16: [COUNT]f64 = undefined;
+	var expected_i32: [COUNT]f64 = undefined;
+	var expected_i64: [COUNT]f64 = undefined;
+	var expected_i128: [COUNT]f64 = undefined;
+	{
+		var seed: u64 = undefined;
+		std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
+		var prng = std.rand.DefaultPrng.init(seed);
+		const random = prng.random();
+
+		var appender = try conn.appender(null, "appdec");
+		defer appender.deinit();
+
+		for (0..COUNT) |i| {
+			const d1 = @trunc(random.float(f64) * 100) / 10;
+			expected_i16[i] = d1;
+			const d2 = @trunc(random.float(f64) * 100000000) / 1000;
+			expected_i32[i] = d2;
+			const d3 = @trunc(random.float(f64) * 10000000000000000) / 100000;
+			expected_i64[i] = d3;
+			const d4 = @trunc(random.float(f64) * 100000000000000000000000000000) / 10000000000;
+			expected_i128[i] = d4;
+
+			try appender.appendRow(.{d1, d2, d3, d4});
+		}
+		try appender.flush();
+	}
+
+	var rows = try conn.query("select * from appdec", .{});
+	defer rows.deinit();
+
+	var i: i32 = 0;
+	while (try rows.next()) |row| {
+		try t. expectApproxEqRel(expected_i16[@intCast(i)], row.get(f64, 0), 0.01);
+		try t. expectApproxEqRel(expected_i32[@intCast(i)], row.get(f64, 1), 0.001);
+		try t. expectApproxEqRel(expected_i64[@intCast(i)], row.get(f64, 2), 0.00001);
+		try t. expectApproxEqRel(expected_i128[@intCast(i)], row.get(f64, 3), 0.0000000001);
+		i += 1;
+	}
+	try t.expectEqual(COUNT, i);
+}
+
+// test "Appender: enum" {
+// 	const db = try DB.init(t.allocator, ":memory:", .{});
+// 	defer db.deinit();
+
+// 	var conn = try db.conn();
+// 	defer conn.deinit();
+
+// 	_ = try conn.exec("create type my_enum as enum ('a', 'b', 'ddddd')", .{});
+// 	_ = try conn.exec("create table xx (col_enum my_enum)", .{});
+// 	var appender = try conn.appender(null, "xx");
+// 	defer appender.deinit();
+// }
+
+// const size = c.duckdb_enum_dictionary_size(logical_type);
+// const values = try allocator.alloc([*c]u8, size);
+// defer allocator.free(values);
+// const total = c.duckdb_enum_values(logical_type, values.ptr, values.len);
+// std.debug.print("{d}\n", .{total});
+// for (0..total) |i| {
+// 	std.debug.print("{d} {s}\n", .{i, std.mem.span(values[i])});
+// 	c.duckdb_free(values[i]);
+// }
