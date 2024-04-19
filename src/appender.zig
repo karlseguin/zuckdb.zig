@@ -111,9 +111,7 @@ pub const Appender = struct {
 
 	pub fn flush(self: *Appender) !void {
 		var data_chunk = self.data_chunk orelse return;
-		// if (self.row_index < self.vector_size) {
-			c.duckdb_data_chunk_set_size(data_chunk, self.row_index);
-		// }
+		c.duckdb_data_chunk_set_size(data_chunk, self.row_index);
 
 		const appender = self.appender;
 		if (c.duckdb_append_data_chunk(appender.*, data_chunk) == DuckDBError) {
@@ -401,9 +399,22 @@ pub const Appender = struct {
 	fn appendSlice(self: *Appender, vector: *Vector, values: anytype, row_index: usize) !void {
 		const T = @TypeOf(values);
 		switch (vector.data) {
-			.list => |list| {
-				const size = c.duckdb_list_vector_get_size(vector.vector);
+			.list => |*list| {
+				const size = list.size;
 				const new_size = size + values.len;
+				list.size = new_size;
+
+				list.entries[row_index] = .{
+					.offset = size,
+					.length = values.len,
+				};
+
+				if (c.duckdb_list_vector_set_size(vector.vector, new_size) == DuckDBError) {
+					return error.DuckDBError;
+				}
+				if (c.duckdb_list_vector_reserve(vector.vector, new_size) == DuckDBError) {
+					return error.DuckDBError;
+				}
 
 				switch (list.child) {
 					.i8 => |data| if (T == []i8 or T == []const i8) {
@@ -490,17 +501,6 @@ pub const Appender = struct {
 					// decimal: Vector.Decimal,
 					// uuid: [*c]i128,
 					// @"enum": Vector.Enum,
-				}
-				list.entries[row_index] = .{
-					.offset = size,
-					.length = values.len,
-				};
-
-				if (c.duckdb_list_vector_set_size(vector.vector, new_size) == DuckDBError) {
-					return error.DuckDBError;
-				}
-				if (c.duckdb_list_vector_reserve(vector.vector, new_size) == DuckDBError) {
-					return error.DuckDBError;
 				}
 			},
 			.scalar => |scalar| switch (scalar) {
@@ -930,7 +930,7 @@ test "Appender: decimal fuzz" {
 	try t.expectEqual(COUNT, i);
 }
 
-test "Appender: list" {
+test "Appender: list simple types" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
@@ -978,7 +978,7 @@ test "Appender: list" {
 			&[_]bool{true, false, true, true, false},
 			&[_][]const u8{"hello", "world"}
 		});
-		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null});
+		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null, null, null, null});
 		try appender.flush();
 
 		{
@@ -1017,7 +1017,10 @@ test "Appender: list" {
 			try t.expectEqual(null, row.list(?u32, 8));
 			try t.expectEqual(null, row.list(?u64, 9));
 			try t.expectEqual(null, row.list(?u128, 10));
-			try t.expectEqual(null, row.list(?[]const u8, 11));
+			try t.expectEqual(null, row.list(?f32, 11));
+			try t.expectEqual(null, row.list(?f64, 12));
+			try t.expectEqual(null, row.list(?bool, 13));
+			try t.expectEqual(null, row.list(?[]const u8, 14));
 		}
 	}
 }
@@ -1027,6 +1030,37 @@ fn assertList(expected: anytype, actual: anytype) !void {
 	for (expected, 0..) |e, i| {
 		try t.expectEqual(e, actual.get(i));
 	}
+}
+
+test "Appender: list multiple" {
+const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data integer[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		var i: i32 = 0;
+		while (i < 10) : (i += 1) {
+			try appender.appendRow(.{i, &[_]i32{i, i + 1, i + 2}});
+		}
+		try appender.flush();
+	}
+
+	var rows = try conn.query("select data from applist order by id", .{});
+	defer rows.deinit();
+
+	var i: i32 = 0;
+	while (try rows.next()) |row| {
+		try assertList(&[_]i32{i, i + 1, i + 2}, row.list(i32, 0).?);
+		i += 1;
+	}
+	try t.expectEqual(10, i);
 }
 
 // test "Appender: enum" {

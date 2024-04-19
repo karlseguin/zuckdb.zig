@@ -199,6 +199,12 @@ pub const Vector = struct {
 		validity: [*c]u64,
 		type: c.duckdb_type,
 		entries: [*]c.duckdb_list_entry,
+
+		// size is only set when we're appending, to keep track of the current number
+		// of items in the vector.
+		size: usize = 0,
+
+		// used when apppending directly into the child vector
 		child_vector: c.duckdb_vector,
 	};
 

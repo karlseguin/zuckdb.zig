@@ -352,4 +352,4 @@ One-dimension lists are upcoming.
 
 Decimals are supported, but be careful! When appending a float, the value will truncated to the decimal place specified by the scale of the column (i.e. a decimal(8, 3) will have the float truncated with 3 decimal places). When appending an int, the library assumes that you have already converted the decimal to the DuckDB internal representation. While surprising, this provides callers with precise control.
 
-Default values are [not supported](https://github.com/duckdb/duckdb/discussions/9158). You should append a value for every column.
+Default values are [not supported](https://github.com/duckdb/duckdb/discussions/9158). Using either the `appendRow` API, or the more verbose `beingRow()` + `appendValue()` for each column + `endRow()`, you **must** set every column.
