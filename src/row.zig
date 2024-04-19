@@ -289,7 +289,7 @@ fn getBlob(scalar: Vector.Scalar, index: usize) []u8 {
 // largely taken from duckdb's uuid type
 fn getUUID(scalar: Vector.Scalar, index: usize) UUID {
 	const hex = "0123456789abcdef";
-	const n = scalar.i128[index];
+	const n = scalar.uuid[index];
 
 	const h = lib.hugeInt(n);
 

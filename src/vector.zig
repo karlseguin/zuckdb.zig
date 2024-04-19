@@ -200,12 +200,15 @@ pub const Vector = struct {
 		type: c.duckdb_type,
 		entries: [*]c.duckdb_list_entry,
 
-		// size is only set when we're appending, to keep track of the current number
-		// of items in the vector.
+		// used by the appender to track the current number of entries
 		size: usize = 0,
 
-		// used when apppending directly into the child vector
+		// used by the appender when writing a text child (for non-text children
+		// the child scalar is all we need).
 		child_vector: c.duckdb_vector,
+
+		// used when appender when writing a null child
+		child_validity: ?[*c]u64 = null,
 	};
 
 	pub const Enum = struct {
@@ -255,7 +258,8 @@ fn scalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Ve
 			c.DUCKDB_TYPE_SMALLINT => return .{ .i16 = @ptrCast(@alignCast(raw_data)) },
 			c.DUCKDB_TYPE_INTEGER => return .{ .i32 = @ptrCast(@alignCast(raw_data)) },
 			c.DUCKDB_TYPE_BIGINT => return .{ .i64 = @ptrCast(@alignCast(raw_data)) },
-			c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID => return .{ .i128 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_HUGEINT  => return .{ .i128 = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_UUID  => return .{ .uuid = @ptrCast(@alignCast(raw_data)) },
 			c.DUCKDB_TYPE_UHUGEINT => return .{ .u128 = @ptrCast(@alignCast(raw_data)) },
 			c.DUCKDB_TYPE_UTINYINT => return .{ .u8 = @ptrCast(raw_data) },
 			c.DUCKDB_TYPE_USMALLINT => return .{ .u16 = @ptrCast(@alignCast(raw_data)) },

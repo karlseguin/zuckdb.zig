@@ -133,6 +133,10 @@ pub const Appender = struct {
 	}
 
 	pub fn appendRow(self: *Appender, values: anytype) !void {
+		// This is to help the caller make sure they set all the values. Not setting
+		// a value is an undefined behavior.
+		std.debug.assert(values.len == self.vectors.len);
+
 		self.beginRow();
 
 		inline for (values, 0..) |value, i| {
@@ -417,78 +421,43 @@ pub const Appender = struct {
 				}
 
 				switch (list.child) {
-					.i8 => |data| if (T == []i8 or T == []const i8) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("tinyint[]", T);
-					},
-					.i16 => |data| if (T == []i16 or T == []const i16) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("smallint[]", T);
-					},
-					.i32 => |data| if (T == []i32 or T == []const i32) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("integer[]", T);
-					},
-					.i64 => |data| if (T == []i64 or T == []const i64) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("bigint[]", T);
-					},
-					.i128 => |data| if (T == []i128 or T == []const i128) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("hugeint[]", T);
-					},
-					.u8 => |data| if (T == []u8 or T == []const u8) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("utinyint[]", T);
-					},
-					.u16 => |data| if (T == []u16 or T == []const u16) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("usmallint[]", T);
-					},
-					.u32 => |data| if (T == []u32 or T == []const u32) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("uinteger[]", T);
-					},
-					.u64 => |data| if (T == []u64 or T == []const u64) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("ubigint[]", T);
-					},
-					.u128 => |data| if (T == []u128 or T == []const u128) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("uhugeint[]", T);
-					},
-					.f32 => |data| if (T == []f32 or T == []const f32) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("real[]", T);
-					},
-					.f64 => |data| if (T == []f64 or T == []const f64) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("double[]", T);
-					},
-					.bool => |data| if (T == []bool or T == []const bool) {
-						@memcpy(data[size..new_size], values);
-					} else {
-						return self.appendTypeError("bool[]", T);
-					},
-					.blob, .varchar => if (T == []const []const u8) {
+					// .i8 => |data| if (T == []const i8) {
+					// 	@memcpy(data[size..new_size], values);
+					// } else if (T == []const ?i8) {
+					// 	for (values, size..) |value, i| {
+					// 		if (value) |v| data[i] = v
+					// 		else c.duckdb_validity_set_row_invalid(child_validity, i);
+					// 	}
+					// } else {
+					// 	return self.appendTypeError("tinyint[]", T);
+					// },
+					.i8 => |data| return self.setList(i8, "tinyint[]", list, values, data[size..new_size]),
+					.i16 => |data| return self.setList(i16, "smallint[]", list, values, data[size..new_size]),
+					.i32 => |data| return self.setList(i32, "integer[]", list, values, data[size..new_size]),
+					.i64 => |data| return self.setList(i64, "bigint[]", list, values, data[size..new_size]),
+					.i128 => |data| return self.setList(i128, "hugeint[]", list, values, data[size..new_size]),
+					.u8 => |data| return self.setList(u8, "utinyint[]", list, values, data[size..new_size]),
+					.u16 => |data| return self.setList(u16, "usmallint[]", list, values, data[size..new_size]),
+					.u32 => |data| return self.setList(u32, "uinteger[]", list, values, data[size..new_size]),
+					.u64 => |data| return self.setList(u64, "ubigint[]", list, values, data[size..new_size]),
+					.u128 => |data| return self.setList(u128, "uhugeint[]", list, values, data[size..new_size]),
+					.f32 => |data| return self.setList(f32, "real[]", list, values, data[size..new_size]),
+					.f64 => |data| return self.setList(f64, "doule[]", list, values, data[size..new_size]),
+					.bool => |data| return self.setList(bool, "bool[]", list, values, data[size..new_size]),
+					.blob, .varchar => if (T == []const []const u8 or T == []const []u8) {
 						const child_vector = list.child_vector;
 						for (values, size..) |value, i| {
 							c.duckdb_vector_assign_string_element_len(child_vector, i, value.ptr, value.len);
 						}
 					} else {
 						return self.appendTypeError("text[] / blob[]", T);
+					},
+					.uuid => |data| if (T == []const []const u8 or T == []const []u8) {
+						for (values, size..) |value, i| {
+							data[i] = try encodeUUID(value);
+						}
+					} else {
+						return self.appendTypeError("uuid[]", T);
 					},
 					else => unreachable,
 					// bool: [*c]bool,
@@ -507,26 +476,18 @@ pub const Appender = struct {
 				.varchar, .blob  => {
 					// We have a []u8 or []const u8. This could either be a text value
 					// or a utinyint[]. The type of the vector resolves the ambiguity.
-					if (T == []u8 or T == []const u8) {
+					if (T == []const u8) {
 						c.duckdb_vector_assign_string_element_len(vector.vector, row_index, values.ptr, values.len);
 					} else {
 						return self.appendTypeError("varchar/blob", T);
 					}
 				},
-				.i128 => |data| {
+				.uuid => |data| {
 					// maybe we have a []u8 that represents a UUID (either in binary or hex)
-					if (T == []u8 or T == []const u8) {
-						var n: i128 = 0;
-						if (values.len == 36) {
-							n = try uuidToInt(values);
-						} else if (values.len == 16) {
-							n = std.mem.readInt(i128, values[0..16], .big);
-						} else {
-							return error.InvalidUUID;
-						}
-						data[row_index] = n ^ (@as(i128, 1) << 127);
+					if (T == []const u8) {
+						data[row_index] = try encodeUUID(values);
 					} else {
-						return self.appendTypeError(".i128", T);
+						return self.appendTypeError("uuid", T);
 					}
 				},
 				else => return self.appendTypeError("???", T),
@@ -534,9 +495,38 @@ pub const Appender = struct {
 		}
 	}
 
+	fn setList(self: *Appender, comptime T: type, comptime column_type: []const u8, list: *Vector.List, values: anytype, data: anytype) !void {
+		if (@TypeOf(values) == []const T) {
+			@memcpy(data, values);
+			return;
+		}
+
+		if (@TypeOf(values) == []const ?T) {
+			const validity = list.child_validity orelse blk: {
+				const child_vector = list.child_vector;
+				c.duckdb_vector_ensure_validity_writable(child_vector);
+				const v = c.duckdb_vector_get_validity(child_vector);
+				list.child_validity = v;
+				break :blk v;
+			};
+
+			const validity_start = list.size - values.len;
+
+			for (values, 0..) |value, i| {
+				if (value) |v| {
+					data[i] = v;
+				} else {
+					c.duckdb_validity_set_row_invalid(validity, validity_start + i);
+				}
+			}
+			return;
+		}
+
+		return self.appendTypeError(column_type, @TypeOf(values));
+	}
+
 	fn appendTypeError(self: *Appender, comptime data_type: []const u8, value_type: type) error{AppendError} {
 		self.err = "cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ data_type;
-
 		return error.AppendError;
 	}
 
@@ -550,23 +540,30 @@ fn appendError(comptime T: type) void {
 	@compileError("cannot append value of type " ++ @typeName(T));
 }
 
-fn uuidToInt(hex: []const u8) !i128 {
-	var bin: [16]u8 = undefined;
+fn encodeUUID(value: []const u8) !i128 {
+	var n: i128 = 0;
+	if (value.len == 16) {
+		n = std.mem.readInt(i128, value[0..16], .big);
+	} else if (value.len == 36) {
+		var bin: [16]u8 = undefined;
+		if (value[8] != '-' or value[13] != '-' or value[18] != '-' or value[23] != '-') {
+			return error.InvalidUUID;
+		}
 
-	std.debug.assert(hex.len == 36);
-	if (hex[8] != '-' or hex[13] != '-' or hex[18] != '-' or hex[23] != '-') {
+		inline for (encoded_pos, 0..) |i, j| {
+			const hi = hex_to_nibble[value[i + 0]];
+			const lo = hex_to_nibble[value[i + 1]];
+			if (hi == 0xff or lo == 0xff) {
+				return error.InvalidUUID;
+			}
+			bin[j] = hi << 4 | lo;
+		}
+		n = std.mem.readInt(i128, &bin, .big);
+	} else {
 		return error.InvalidUUID;
 	}
 
-	inline for (encoded_pos, 0..) |i, j| {
-		const hi = hex_to_nibble[hex[i + 0]];
-		const lo = hex_to_nibble[hex[i + 1]];
-		if (hi == 0xff or lo == 0xff) {
-			return error.InvalidUUID;
-		}
-		bin[j] = hi << 4 | lo;
-	}
-	return std.mem.readInt(i128, &bin, .big);
+	return n ^ (@as(i128, 1) << 127);
 }
 
 const encoded_pos = [16]u8{ 0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34 };
@@ -953,7 +950,8 @@ test "Appender: list simple types" {
 		\\  col_real real[],
 		\\  col_double double[],
 		\\  col_bool bool[],
-		\\  col_text text[]
+		\\  col_text text[],
+		\\  col_uuid uuid[],
 		\\ )
 	, .{});
 
@@ -976,52 +974,103 @@ test "Appender: list simple types" {
 			&[_]f32{-1.0, 3.44, 0.0, 99.9991},
 			&[_]f64{-1.02, 9999.1303, 0.0, -8288133.11},
 			&[_]bool{true, false, true, true, false},
-			&[_][]const u8{"hello", "world"}
+			&[_][]const u8{"hello", "world"},
+			[2][]const u8{"eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &[_]u8{204, 193, 82, 169, 150, 64, 52, 71, 92, 228, 173, 248, 223, 220, 70, 252}}
 		});
-		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null, null, null, null});
+		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null});
+		try appender.appendRow(.{
+			3,
+			&[_]?i8{-1, null, 9},
+			&[_]?i16{-32768, null, 32767},
+			&[_]?i32{-200000000, null, 200000001},
+			&[_]?i64{-40000000000000000, null, 4000000000000001},
+			&[_]?i128{-999999999999999999999, null, 8888888888888888888},
+			&[_]?u8{254, null},
+			&[_]?u16{65534, null},
+			&[_]?u32{null, 4294967255, 0},
+			&[_]?u64{1, null, null},
+			&[_]?u128{null, null, 0, null, null},
+			&[_]?f32{0.0, null, 0.1},
+			&[_]?f64{0.9999, null, null},
+			&[_]?bool{false, null, true},
+			&[_][]const u8{"hello", "world"},
+			[2][]const u8{"eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &[_]u8{204, 193, 82, 169, 150, 64, 52, 71, 92, 228, 173, 248, 223, 220, 70, 252}}
+		});
 		try appender.flush();
+	}
 
-		{
-			var row = (try conn.row("select * from applist where id = 1", .{})).?;
-			defer row.deinit();
+	{
+		var row = (try conn.row("select * from applist where id = 1", .{})).?;
+		defer row.deinit();
 
-			try assertList(&[_]i8{-128, 0, 100, 127}, row.list(i8, 1).?);
-			try assertList(&[_]i16{-32768, 0, -299, 32767}, row.list(i16, 2).?);
-			try assertList(&[_]i32{-2147483648, -4933, 0, 2147483647}, row.list(i32, 3).?);
-			try assertList(&[_]i64{-9223372036854775808, -8223372036854775800, 0, 9223372036854775807}, row.list(i64, 4).?);
-			try assertList(&[_]i128{-170141183460469231731687303715884105728, -1, 2, 170141183460469231731687303715884105727}, row.list(i128, 5).?);
-			try assertList(&[_]u8{0, 200, 255}, row.list(u8, 6).?);
-			try assertList(&[_]u16{0, 65535}, row.list(u16, 7).?);
-			try assertList(&[_]u32{0, 4294967294, 4294967295}, row.list(u32, 8).?);
-			try assertList(&[_]u64{0, 18446744073709551615}, row.list(u64, 9).?);
-			try assertList(&[_]u128{0, 99999999999999999999998, 340282366920938463463374607431768211455}, row.list(u128, 10).?);
-			try assertList(&[_]f32{-1.0, 3.44, 0.0, 99.9991}, row.list(f32, 11).?);
-			try assertList(&[_]f64{-1.02, 9999.1303, 0.0, -8288133.11}, row.list(f64, 12).?);
-			try assertList(&[_]bool{true, false, true, true, false}, row.list(bool, 13).?);
+		try assertList(&[_]?i8{-128, 0, 100, 127}, row.list(i8, 1).?);
+		try assertList(&[_]?i16{-32768, 0, -299, 32767}, row.list(?i16, 2).?);
+		try assertList(&[_]?i32{-2147483648, -4933, 0, 2147483647}, row.list(?i32, 3).?);
+		try assertList(&[_]?i64{-9223372036854775808, -8223372036854775800, 0, 9223372036854775807}, row.list(?i64, 4).?);
+		try assertList(&[_]?i128{-170141183460469231731687303715884105728, -1, 2, 170141183460469231731687303715884105727}, row.list(?i128, 5).?);
+		try assertList(&[_]?u8{0, 200, 255}, row.list(?u8, 6).?);
+		try assertList(&[_]?u16{0, 65535}, row.list(?u16, 7).?);
+		try assertList(&[_]?u32{0, 4294967294, 4294967295}, row.list(?u32, 8).?);
+		try assertList(&[_]?u64{0, 18446744073709551615}, row.list(?u64, 9).?);
+		try assertList(&[_]?u128{0, 99999999999999999999998, 340282366920938463463374607431768211455}, row.list(?u128, 10).?);
+		try assertList(&[_]?f32{-1.0, 3.44, 0.0, 99.9991}, row.list(?f32, 11).?);
+		try assertList(&[_]?f64{-1.02, 9999.1303, 0.0, -8288133.11}, row.list(?f64, 12).?);
+		try assertList(&[_]?bool{true, false, true, true, false}, row.list(?bool, 13).?);
 
-			const list_texts = row.list([]u8, 14).?;
-			try t.expectEqualStrings("hello", list_texts.get(0));
-			try t.expectEqualStrings("world", list_texts.get(1));
-		}
+		const list_texts = row.list([]u8, 14).?;
+		try t.expectEqualStrings("hello", list_texts.get(0));
+		try t.expectEqualStrings("world", list_texts.get(1));
 
-		{
-			var row = (try conn.row("select * from applist where id = 2", .{})).?;
-			defer row.deinit();
-			try t.expectEqual(null, row.list(?i8, 1));
-			try t.expectEqual(null, row.list(?i16, 2));
-			try t.expectEqual(null, row.list(?i32, 3));
-			try t.expectEqual(null, row.list(?i64, 4));
-			try t.expectEqual(null, row.list(?i128, 5));
-			try t.expectEqual(null, row.list(?u8, 6));
-			try t.expectEqual(null, row.list(?u16, 7));
-			try t.expectEqual(null, row.list(?u32, 8));
-			try t.expectEqual(null, row.list(?u64, 9));
-			try t.expectEqual(null, row.list(?u128, 10));
-			try t.expectEqual(null, row.list(?f32, 11));
-			try t.expectEqual(null, row.list(?f64, 12));
-			try t.expectEqual(null, row.list(?bool, 13));
-			try t.expectEqual(null, row.list(?[]const u8, 14));
-		}
+		const list_uuids = row.list(lib.UUID, 15).?;
+		try t.expectEqualStrings("eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &list_uuids.get(0));
+		try t.expectEqualStrings("ccc152a9-9640-3447-5ce4-adf8dfdc46fc", &list_uuids.get(1));
+	}
+
+	{
+		var row = (try conn.row("select * from applist where id = 2", .{})).?;
+		defer row.deinit();
+		try t.expectEqual(null, row.list(?i8, 1));
+		try t.expectEqual(null, row.list(?i16, 2));
+		try t.expectEqual(null, row.list(?i32, 3));
+		try t.expectEqual(null, row.list(?i64, 4));
+		try t.expectEqual(null, row.list(?i128, 5));
+		try t.expectEqual(null, row.list(?u8, 6));
+		try t.expectEqual(null, row.list(?u16, 7));
+		try t.expectEqual(null, row.list(?u32, 8));
+		try t.expectEqual(null, row.list(?u64, 9));
+		try t.expectEqual(null, row.list(?u128, 10));
+		try t.expectEqual(null, row.list(?f32, 11));
+		try t.expectEqual(null, row.list(?f64, 12));
+		try t.expectEqual(null, row.list(?bool, 13));
+		try t.expectEqual(null, row.list(?[]const u8, 14));
+		try t.expectEqual(null, row.list(?[]const u8, 15));
+	}
+
+	{
+		var row = (try conn.row("select * from applist where id = 3", .{})).?;
+		defer row.deinit();
+
+		try assertList(&[_]?i8{-1, null, 9}, row.list(?i8, 1).?);
+		try assertList(&[_]?i16{-32768, null, 32767}, row.list(?i16, 2).?);
+		try assertList(&[_]?i32{-200000000, null, 200000001}, row.list(?i32, 3).?);
+		try assertList(&[_]?i64{-40000000000000000, null, 4000000000000001}, row.list(?i64, 4).?);
+		try assertList(&[_]?i128{-999999999999999999999, null, 8888888888888888888}, row.list(?i128, 5).?);
+		try assertList(&[_]?u8{254, null}, row.list(?u8, 6).?);
+		try assertList(&[_]?u16{65534, null}, row.list(?u16, 7).?);
+		try assertList(&[_]?u32{null, 4294967255, 0}, row.list(?u32, 8).?);
+		try assertList(&[_]?u64{1, null, null}, row.list(?u64, 9).?);
+		try assertList(&[_]?u128{null, null, 0, null, null}, row.list(?u128, 10).?);
+		try assertList(&[_]?f32{0.0, null, 0.1}, row.list(?f32, 11).?);
+		try assertList(&[_]?f64{0.9999, null, null}, row.list(?f64, 12).?);
+		try assertList(&[_]?bool{false, null, true}, row.list(?bool, 13).?);
+
+		// const list_texts = row.list([]u8, 14).?;
+		// try t.expectEqualStrings("hello", list_texts.get(0));
+		// try t.expectEqualStrings("world", list_texts.get(1));
+
+		// const list_uuids = row.list(lib.UUID, 15).?;
+		// try t.expectEqualStrings("eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &list_uuids.get(0));
+		// try t.expectEqualStrings("ccc152a9-9640-3447-5ce4-adf8dfdc46fc", &list_uuids.get(1));
 	}
 }
 
