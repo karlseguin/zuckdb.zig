@@ -61,7 +61,7 @@ pub const Appender = struct {
 				.scalar => |scalar| switch (scalar) {
 					.simple => {},
 					.decimal => {},
-					.@"enum" => return error.CannotAppendToEnum,
+					.@"enum" => return error.CannotAppendToEnum, // https://github.com/duckdb/duckdb/pull/11704
 				},
 			}
 		}
@@ -71,9 +71,9 @@ pub const Appender = struct {
 			.row_index = 0,
 			.types = types,
 			.vectors = vectors,
+			.data_chunk = null,
 			.appender = appender,
 			.allocator = allocator,
-			.data_chunk = null,
 			.vector_size = c.duckdb_vector_size(),
 		};
 	}
@@ -398,41 +398,145 @@ pub const Appender = struct {
 		}
 	}
 
-	fn appendSlice(self: *Appender, vector: *Vector, value: anytype, row_index: usize) !void {
-		const T = @TypeOf(value);
-		if (T == []u8 or T == []const u8) {
-			return self.appendString(vector, value, row_index);
-		}
-		// TODO
-		appendError(T);
-	}
-
-	fn appendString(self: *Appender, vector: *Vector, value: anytype, row_index: usize) !void {
+	fn appendSlice(self: *Appender, vector: *Vector, values: anytype, row_index: usize) !void {
+		const T = @TypeOf(values);
 		switch (vector.data) {
-			.list => return self.appendTypeError("list", @TypeOf(value)),
-			.scalar => |scalar| switch (scalar) {
-				.blob, .varchar => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
-				.i128 => |data| {
-					var n: i128 = 0;
-					if (value.len == 36) {
-						n = try uuidToInt(value);
-					} else if (value.len == 16) {
-						n = std.mem.readInt(i128, value[0..16], .big);
+			.list => |list| {
+				const size = c.duckdb_list_vector_get_size(vector.vector);
+				const new_size = size + values.len;
+
+				switch (list.child) {
+					.i8 => |data| if (T == []i8 or T == []const i8) {
+						@memcpy(data[size..new_size], values);
 					} else {
-						return error.InvalidUUID;
+						return self.appendTypeError("tinyint[]", T);
+					},
+					.i16 => |data| if (T == []i16 or T == []const i16) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("smallint[]", T);
+					},
+					.i32 => |data| if (T == []i32 or T == []const i32) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("integer[]", T);
+					},
+					.i64 => |data| if (T == []i64 or T == []const i64) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("bigint[]", T);
+					},
+					.i128 => |data| if (T == []i128 or T == []const i128) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("hugeint[]", T);
+					},
+					.u8 => |data| if (T == []u8 or T == []const u8) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("utinyint[]", T);
+					},
+					.u16 => |data| if (T == []u16 or T == []const u16) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("usmallint[]", T);
+					},
+					.u32 => |data| if (T == []u32 or T == []const u32) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("uinteger[]", T);
+					},
+					.u64 => |data| if (T == []u64 or T == []const u64) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("ubigint[]", T);
+					},
+					.u128 => |data| if (T == []u128 or T == []const u128) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("uhugeint[]", T);
+					},
+					.f32 => |data| if (T == []f32 or T == []const f32) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("real[]", T);
+					},
+					.f64 => |data| if (T == []f64 or T == []const f64) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("double[]", T);
+					},
+					.bool => |data| if (T == []bool or T == []const bool) {
+						@memcpy(data[size..new_size], values);
+					} else {
+						return self.appendTypeError("bool[]", T);
+					},
+					.blob, .varchar => if (T == []const []const u8) {
+						const child_vector = list.child_vector;
+						for (values, size..) |value, i| {
+							c.duckdb_vector_assign_string_element_len(child_vector, i, value.ptr, value.len);
+						}
+					} else {
+						return self.appendTypeError("text[] / blob[]", T);
+					},
+					else => unreachable,
+					// bool: [*c]bool,
+					// f32: [*c]f32,
+					// f64: [*c]f64,
+					// date: [*]c.duckdb_date,
+					// time: [*]c.duckdb_time,
+					// timestamp: [*]c.duckdb_timestamp,
+					// interval: [*]c.duckdb_interval,
+					// decimal: Vector.Decimal,
+					// uuid: [*c]i128,
+					// @"enum": Vector.Enum,
+				}
+				list.entries[row_index] = .{
+					.offset = size,
+					.length = values.len,
+				};
+
+				if (c.duckdb_list_vector_set_size(vector.vector, new_size) == DuckDBError) {
+					return error.DuckDBError;
+				}
+				if (c.duckdb_list_vector_reserve(vector.vector, new_size) == DuckDBError) {
+					return error.DuckDBError;
+				}
+			},
+			.scalar => |scalar| switch (scalar) {
+				.varchar, .blob  => {
+					// We have a []u8 or []const u8. This could either be a text value
+					// or a utinyint[]. The type of the vector resolves the ambiguity.
+					if (T == []u8 or T == []const u8) {
+						c.duckdb_vector_assign_string_element_len(vector.vector, row_index, values.ptr, values.len);
+					} else {
+						return self.appendTypeError("varchar/blob", T);
 					}
-					data[row_index] = n ^ (@as(i128, 1) << 127);
 				},
-				else => {
-					// we don't want to allocate, and we don't know the vector type at compile time, so we use ???. Fail.
-					return self.appendTypeError("???", lib.UUID);
+				.i128 => |data| {
+					// maybe we have a []u8 that represents a UUID (either in binary or hex)
+					if (T == []u8 or T == []const u8) {
+						var n: i128 = 0;
+						if (values.len == 36) {
+							n = try uuidToInt(values);
+						} else if (values.len == 16) {
+							n = std.mem.readInt(i128, values[0..16], .big);
+						} else {
+							return error.InvalidUUID;
+						}
+						data[row_index] = n ^ (@as(i128, 1) << 127);
+					} else {
+						return self.appendTypeError(".i128", T);
+					}
 				},
-			}
+				else => return self.appendTypeError("???", T),
+			},
 		}
 	}
 
 	fn appendTypeError(self: *Appender, comptime data_type: []const u8, value_type: type) error{AppendError} {
 		self.err = "cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ data_type;
+
 		return error.AppendError;
 	}
 
@@ -824,6 +928,105 @@ test "Appender: decimal fuzz" {
 		i += 1;
 	}
 	try t.expectEqual(COUNT, i);
+}
+
+test "Appender: list" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec(
+		\\ create table applist (
+		\\  id integer,
+		\\  col_tinyint tinyint[],
+		\\  col_smallint smallint[],
+		\\  col_integer integer[],
+		\\  col_bigint bigint[],
+		\\  col_hugeint hugeint[],
+		\\  col_utinyint utinyint[],
+		\\  col_usmallint usmallint[],
+		\\  col_uinteger uinteger[],
+		\\  col_ubigint ubigint[],
+		\\  col_uhugeint uhugeint[],
+		\\  col_real real[],
+		\\  col_double double[],
+		\\  col_bool bool[],
+		\\  col_text text[]
+		\\ )
+	, .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		try appender.appendRow(.{
+			1,
+			&[_]i8{-128, 0, 100, 127},
+			&[_]i16{-32768, 0, -299, 32767},
+			&[_]i32{-2147483648, -4933, 0, 2147483647},
+			&[_]i64{-9223372036854775808, -8223372036854775800, 0, 9223372036854775807},
+			&[_]i128{-170141183460469231731687303715884105728, -1, 2, 170141183460469231731687303715884105727},
+			&[_]u8{0, 200, 255},
+			&[_]u16{0, 65535},
+			&[_]u32{0, 4294967294, 4294967295},
+			&[_]u64{0, 18446744073709551615},
+			&[_]u128{0, 99999999999999999999998, 340282366920938463463374607431768211455},
+			&[_]f32{-1.0, 3.44, 0.0, 99.9991},
+			&[_]f64{-1.02, 9999.1303, 0.0, -8288133.11},
+			&[_]bool{true, false, true, true, false},
+			&[_][]const u8{"hello", "world"}
+		});
+		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null});
+		try appender.flush();
+
+		{
+			var row = (try conn.row("select * from applist where id = 1", .{})).?;
+			defer row.deinit();
+
+			try assertList(&[_]i8{-128, 0, 100, 127}, row.list(i8, 1).?);
+			try assertList(&[_]i16{-32768, 0, -299, 32767}, row.list(i16, 2).?);
+			try assertList(&[_]i32{-2147483648, -4933, 0, 2147483647}, row.list(i32, 3).?);
+			try assertList(&[_]i64{-9223372036854775808, -8223372036854775800, 0, 9223372036854775807}, row.list(i64, 4).?);
+			try assertList(&[_]i128{-170141183460469231731687303715884105728, -1, 2, 170141183460469231731687303715884105727}, row.list(i128, 5).?);
+			try assertList(&[_]u8{0, 200, 255}, row.list(u8, 6).?);
+			try assertList(&[_]u16{0, 65535}, row.list(u16, 7).?);
+			try assertList(&[_]u32{0, 4294967294, 4294967295}, row.list(u32, 8).?);
+			try assertList(&[_]u64{0, 18446744073709551615}, row.list(u64, 9).?);
+			try assertList(&[_]u128{0, 99999999999999999999998, 340282366920938463463374607431768211455}, row.list(u128, 10).?);
+			try assertList(&[_]f32{-1.0, 3.44, 0.0, 99.9991}, row.list(f32, 11).?);
+			try assertList(&[_]f64{-1.02, 9999.1303, 0.0, -8288133.11}, row.list(f64, 12).?);
+			try assertList(&[_]bool{true, false, true, true, false}, row.list(bool, 13).?);
+
+			const list_texts = row.list([]u8, 14).?;
+			try t.expectEqualStrings("hello", list_texts.get(0));
+			try t.expectEqualStrings("world", list_texts.get(1));
+		}
+
+		{
+			var row = (try conn.row("select * from applist where id = 2", .{})).?;
+			defer row.deinit();
+			try t.expectEqual(null, row.list(?i8, 1));
+			try t.expectEqual(null, row.list(?i16, 2));
+			try t.expectEqual(null, row.list(?i32, 3));
+			try t.expectEqual(null, row.list(?i64, 4));
+			try t.expectEqual(null, row.list(?i128, 5));
+			try t.expectEqual(null, row.list(?u8, 6));
+			try t.expectEqual(null, row.list(?u16, 7));
+			try t.expectEqual(null, row.list(?u32, 8));
+			try t.expectEqual(null, row.list(?u64, 9));
+			try t.expectEqual(null, row.list(?u128, 10));
+			try t.expectEqual(null, row.list(?[]const u8, 11));
+		}
+	}
+}
+
+fn assertList(expected: anytype, actual: anytype) !void {
+	try t.expectEqual(expected.len, actual.len);
+	for (expected, 0..) |e, i| {
+		try t.expectEqual(e, actual.get(i));
+	}
 }
 
 // test "Appender: enum" {

@@ -199,6 +199,7 @@ pub const Vector = struct {
 		validity: [*c]u64,
 		type: c.duckdb_type,
 		entries: [*]c.duckdb_list_entry,
+		child_vector: c.duckdb_vector,
 	};
 
 	pub const Enum = struct {
@@ -278,6 +279,7 @@ fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vecto
 		.child = child_data,
 		.validity = child_validity,
 		.entries = @ptrCast(@alignCast(raw_data)),
+		.child_vector = child_vector,
 		.type = switch (child_type.*) {
 			.@"enum" => c.DUCKDB_TYPE_ENUM,
 			.decimal => c.DUCKDB_TYPE_DECIMAL,
