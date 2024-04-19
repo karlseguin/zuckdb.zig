@@ -33,7 +33,7 @@ pub const Vector = struct {
 	pub fn loadVector(self: *Vector, real_vector: c.duckdb_vector) void {
 		self.vector = real_vector;
 		self.data = switch (self.type) {
-			.list => |*l| .{.container = listData(l, real_vector)},
+			.list => |*l| .{.list = listData(l, real_vector)},
 			.scalar => |*s| .{.scalar = scalarData(s, real_vector)},
 		};
 	}
@@ -152,7 +152,7 @@ pub const Vector = struct {
 
 	pub const Data = union(enum) {
 		scalar: Scalar,
-		container: Container,
+		list: Vector.List,
 	};
 
 	pub const Scalar = union(enum) {
@@ -180,9 +180,6 @@ pub const Vector = struct {
 		@"enum": Vector.Enum,
 	};
 
-	pub const Container = union(enum) {
-		list: Vector.List,
-	};
 
 	pub const Decimal = struct {
 		width: u8,
@@ -270,14 +267,14 @@ fn scalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Ve
 	}
 }
 
-fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.Container {
+fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.List {
 	const raw_data = c.duckdb_vector_get_data(real_vector);
 
 	const child_vector = c.duckdb_list_vector_get_child(real_vector);
 	const child_data = scalarData(child_type, child_vector);
 	const child_validity = c.duckdb_vector_get_validity(child_vector);
 
-	return .{.list = .{
+	return .{
 		.child = child_data,
 		.validity = child_validity,
 		.entries = @ptrCast(@alignCast(raw_data)),
@@ -286,5 +283,5 @@ fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vecto
 			.decimal => c.DUCKDB_TYPE_DECIMAL,
 			.simple => |s| s,
 		},
-	}};
+	};
 }

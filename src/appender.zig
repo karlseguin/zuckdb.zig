@@ -200,7 +200,7 @@ pub const Appender = struct {
 		}
 
 		switch (vector.data) {
-			.container => return self.appendTypeError("container", T),
+			.list => return self.appendTypeError("list", T),
 			.scalar => |scalar| switch (scalar) {
 				.bool => |data| {
 					switch (type_info) {
@@ -409,7 +409,7 @@ pub const Appender = struct {
 
 	fn appendString(self: *Appender, vector: *Vector, value: anytype, row_index: usize) !void {
 		switch (vector.data) {
-			.container => return self.appendTypeError("container", @TypeOf(value)),
+			.list => return self.appendTypeError("list", @TypeOf(value)),
 			.scalar => |scalar| switch (scalar) {
 				.blob, .varchar => c.duckdb_vector_assign_string_element_len(vector.vector, row_index, value.ptr, value.len),
 				.i128 => |data| {

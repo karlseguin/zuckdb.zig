@@ -45,7 +45,7 @@ pub const Row = struct {
 		const vector = self.vectors[col];
 		if (_isNull(vector.validity.?, index)) return null;
 
-		const vc = vector.data.container.list;
+		const vc = vector.data.list;
 		const entry = vc.entries[index];
 		return List(T).init(col, vc.child, vc.validity, entry.offset, entry.length);
 	}
@@ -55,14 +55,14 @@ pub const Row = struct {
 		const vector = self.vectors[col];
 		if (_isNull(vector.validity.?, index)) return null;
 
-		const vc = vector.data.container.list;
+		const vc = vector.data.list;
 		const entry = vc.entries[index];
 		return LazyList.init(col, vc.child, vc.validity, entry.offset, entry.length);
 	}
 
 	pub fn listItemType(self: Row, col: usize) DataType {
 		// (⌐■_■)
-		return lib.DataType.fromDuckDBType(self.vectors[col].data.container.list.type);
+		return lib.DataType.fromDuckDBType(self.vectors[col].data.list.type);
 	}
 
 	pub fn isNull(self: Row, col: usize) bool {
