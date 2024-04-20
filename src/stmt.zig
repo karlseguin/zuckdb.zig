@@ -545,35 +545,35 @@ test "query parameters" {
 
 	// bool
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BOOLEAN), stmt.DataTypeC(0));
-	try t.expectEqual(DataType.bool, stmt.DataType(0));
+	try t.expectEqual(DataType.boolean, stmt.DataType(0));
 
 	// int
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TINYINT), stmt.DataTypeC(1));
-	try t.expectEqual(DataType.i8, stmt.DataType(1));
+	try t.expectEqual(DataType.tinyint, stmt.DataType(1));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_SMALLINT), stmt.DataTypeC(2));
-	try t.expectEqual(DataType.i16, stmt.DataType(2));
+	try t.expectEqual(DataType.smallint, stmt.DataType(2));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTEGER), stmt.DataTypeC(3));
-	try t.expectEqual(DataType.i32, stmt.DataType(3));
+	try t.expectEqual(DataType.integer, stmt.DataType(3));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BIGINT), stmt.DataTypeC(4));
-	try t.expectEqual(DataType.i64, stmt.DataType(4));
+	try t.expectEqual(DataType.bigint, stmt.DataType(4));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_HUGEINT), stmt.DataTypeC(5));
-	try t.expectEqual(DataType.i128, stmt.DataType(5));
+	try t.expectEqual(DataType.hugeint, stmt.DataType(5));
 
 	// uint
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UTINYINT), stmt.DataTypeC(6));
-	try t.expectEqual(DataType.u8, stmt.DataType(6));
+	try t.expectEqual(DataType.utinyint, stmt.DataType(6));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_USMALLINT), stmt.DataTypeC(7));
-	try t.expectEqual(DataType.u16, stmt.DataType(7));
+	try t.expectEqual(DataType.usmallint, stmt.DataType(7));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UINTEGER), stmt.DataTypeC(8));
-	try t.expectEqual(DataType.u32, stmt.DataType(8));
+	try t.expectEqual(DataType.uinteger, stmt.DataType(8));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_UBIGINT), stmt.DataTypeC(9));
-	try t.expectEqual(DataType.u64, stmt.DataType(9));
+	try t.expectEqual(DataType.ubigint, stmt.DataType(9));
 
 	// float & decimal
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_FLOAT), stmt.DataTypeC(10));
-	try t.expectEqual(DataType.f32, stmt.DataType(10));
+	try t.expectEqual(DataType.real, stmt.DataType(10));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DOUBLE), stmt.DataTypeC(11));
-	try t.expectEqual(DataType.f64, stmt.DataType(11));
+	try t.expectEqual(DataType.double, stmt.DataType(11));
 	try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DECIMAL), stmt.DataTypeC(12));
 	try t.expectEqual(DataType.decimal, stmt.DataType(12));
 

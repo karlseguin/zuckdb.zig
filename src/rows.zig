@@ -199,6 +199,6 @@ test "rows: introspect" {
 	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
 	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
 
-	try t.expectEqual(.i32, rows.columnType(0));
+try t.expectEqual(.integer, rows.columnType(0));
 	try t.expectEqual(.varchar, rows.columnType(1));
 }

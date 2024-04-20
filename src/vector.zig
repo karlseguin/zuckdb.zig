@@ -29,6 +29,16 @@ pub const Vector = struct {
 		self.type.deinit();
 	}
 
+	pub fn writeType(self: *const Vector, writer: anytype) !void {
+		switch (self.type) {
+			.list => |list| {
+				try list.writeType(writer);
+				return writer.writeAll("[]");
+			},
+			.scalar => |s| return s.writeType(writer),
+		}
+	}
+
 	pub fn loadVector(self: *Vector, real_vector: c.duckdb_vector) void {
 		self.vector = real_vector;
 		self.data = switch (self.type) {
@@ -124,6 +134,14 @@ pub const Vector = struct {
 				switch (self.*) {
 					.simple, .decimal => {},
 					.@"enum" => |*e| c.duckdb_destroy_logical_type(&e.logical_type),
+				}
+			}
+
+			pub fn writeType(self: *const Vector.Type.Scalar, writer: anytype) !void {
+				switch (self.*) {
+					.simple => |duckdb_type| return writer.writeAll(@tagName(lib.DataType.fromDuckDBType(duckdb_type))),
+					.@"enum" => return writer.writeAll("enum"),
+					.decimal => |d| return std.fmt.format(writer, "decimal({d},{d})", .{d.width, d.scale}),
 				}
 			}
 		};
@@ -306,4 +324,78 @@ fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vecto
 			.simple => |s| s,
 		},
 	};
+}
+
+const t = std.testing;
+const DB = lib.DB;
+test "Vector: write type" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec(
+		\\ create table all_types (
+		\\   col_tinyint tinyint,
+		\\   col_smallint smallint,
+		\\   col_integer integer,
+		\\   col_bigint bigint,
+		\\   col_hugeint hugeint,
+		\\   col_utinyint utinyint,
+		\\   col_usmallint usmallint,
+		\\   col_uinteger uinteger,
+		\\   col_ubigint ubigint,
+		\\   col_uhugeint uhugeint,
+		\\   col_bool bool,
+		\\   col_real real,
+		\\   col_double double,
+		\\   col_text text,
+		\\   col_blob blob,
+		\\   col_uuid uuid,
+		\\   col_date date,
+		\\   col_time time,
+		\\   col_interval interval,
+		\\   col_timestamp timestamp,
+		\\   col_decimal decimal(18, 6),
+		\\   col_tinyint_arr tinyint[],
+		\\   col_decimal_arr decimal(5, 4)[],
+		\\ )
+	, .{});
+
+	const rows = try conn.query("select * from all_types", .{});
+	defer rows.deinit();
+
+	var arr = std.ArrayList(u8).init(t.allocator);
+	defer arr.deinit();
+
+	try expectTypeName(&arr, rows.vectors[0], "tinyint");
+	try expectTypeName(&arr, rows.vectors[1], "smallint");
+	try expectTypeName(&arr, rows.vectors[2], "integer");
+	try expectTypeName(&arr, rows.vectors[3], "bigint");
+	try expectTypeName(&arr, rows.vectors[4], "hugeint");
+	try expectTypeName(&arr, rows.vectors[5], "utinyint");
+	try expectTypeName(&arr, rows.vectors[6], "usmallint");
+	try expectTypeName(&arr, rows.vectors[7], "uinteger");
+	try expectTypeName(&arr, rows.vectors[8], "ubigint");
+	try expectTypeName(&arr, rows.vectors[9], "uhugeint");
+	try expectTypeName(&arr, rows.vectors[10], "boolean");
+	try expectTypeName(&arr, rows.vectors[11], "real");
+	try expectTypeName(&arr, rows.vectors[12], "double");
+	try expectTypeName(&arr, rows.vectors[13], "varchar");
+	try expectTypeName(&arr, rows.vectors[14], "blob");
+	try expectTypeName(&arr, rows.vectors[15], "uuid");
+	try expectTypeName(&arr, rows.vectors[16], "date");
+	try expectTypeName(&arr, rows.vectors[17], "time");
+	try expectTypeName(&arr, rows.vectors[18], "interval");
+	try expectTypeName(&arr, rows.vectors[19], "timestamp");
+	try expectTypeName(&arr, rows.vectors[20], "decimal(18,6)");
+	try expectTypeName(&arr, rows.vectors[21], "tinyint[]");
+	try expectTypeName(&arr, rows.vectors[22], "decimal(5,4)[]");
+}
+
+fn expectTypeName(arr: *std.ArrayList(u8), vector: Vector, expected: []const u8) !void {
+	arr.clearRetainingCapacity();
+	try vector.writeType(arr.writer());
+	try t.expectEqualStrings(expected, arr.items);
 }
