@@ -22,7 +22,6 @@ pub const Interval = lib.Interval;
 pub const DataType = lib.DataType;
 
 pub fn StaticState(comptime N: usize) type {
-	const Vector = @import("vector.zig").Vector;
 	return struct {
 		vector: [N]Vector = undefined,
 
