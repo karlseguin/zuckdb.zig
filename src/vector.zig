@@ -3,7 +3,6 @@ const lib = @import("lib.zig");
 
 const c = lib.c;
 const Rows = lib.Rows;
-const DataType = lib.DataType;
 const Allocator = std.mem.Allocator;
 
 // DuckDB exposes data as "vectors", which is essentially a pointer to memory

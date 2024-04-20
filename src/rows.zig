@@ -10,8 +10,6 @@ const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
 pub const Rows = struct {
-	allocator: Allocator,
-
 	// When not null, the rows owns the stmt and is responsible for freeing it.
 	stmt: ?*c.duckdb_prepared_statement,
 
@@ -39,15 +37,7 @@ pub const Rows = struct {
 	// Vector data + validity  + type info for the current chunk
 	vectors: []Vector = undefined,
 
-	// The duckdb gives us the enum name, but as a C string we need to free. This
-	// is potentially both expensive and awkward. We're going to intern the enums
-	// and manage the strings in an arena.
-	_arena: *std.heap.ArenaAllocator,
-	arena: std.mem.Allocator,
-
-	// We might have more than 1 enum column. Our cache is:
-	//   column_index =>  internal_enum_integer => string
-	enum_name_cache: std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)),
+	arena: *std.heap.ArenaAllocator,
 
 	pub fn init(allocator: Allocator, stmt: ?*c.duckdb_prepared_statement, result: *c.duckdb_result, state: anytype) !Rows {
 		errdefer if (stmt) |s| {
@@ -59,29 +49,14 @@ pub const Rows = struct {
 		const chunk_count = c.duckdb_result_chunk_count(r);
 		const column_count = c.duckdb_column_count(result);
 
-		if (chunk_count == 0) {
-			// no chunk, we don't need to load everything else
-			return .{
-				.arena = undefined,
-				._arena = undefined,
-				.stmt = stmt,
-				.result = result,
-				.chunk_count = 0,
-				.allocator = allocator,
-				.column_count = column_count,
-				.vectors = &[_]Vector{},
-				.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(undefined),
-			};
-		}
+		var arena = try allocator.create(std.heap.ArenaAllocator);
+		errdefer allocator.destroy(arena);
 
-		const arena = try allocator.create(std.heap.ArenaAllocator);
-		errdefer arena.deinit();
 		arena.* = std.heap.ArenaAllocator.init(allocator);
+		errdefer arena.deinit();
 
 		const aa = arena.allocator();
-
 		var vectors: []Vector = undefined;
-
 		if (@TypeOf(state) == @TypeOf(null)) {
 			vectors = try aa.alloc(Vector, column_count);
 		} else {
@@ -94,23 +69,20 @@ pub const Rows = struct {
 
 		return .{
 			.stmt = stmt,
-			._arena = arena,
-			.arena = aa,
+			.arena = arena,
 			.result = result,
-			.allocator = allocator,
+			.vectors = vectors,
 			.chunk_count = chunk_count,
 			.column_count = column_count,
-			.vectors = vectors,
-			.enum_name_cache = std.AutoHashMap(u64, std.AutoHashMap(u64, []const u8)).init(aa),
 		};
 	}
 
-	pub fn deinit(self: Rows) void {
+	pub fn deinit(self: *const Rows) void {
 		for (self.vectors) |*v| {
 			v.deinit();
 		}
 
-		const allocator = self.allocator;
+		const allocator = self.arena.child_allocator;
 		{
 			const result = self.result;
 			c.duckdb_destroy_result(result);
@@ -122,28 +94,31 @@ pub const Rows = struct {
 			allocator.destroy(stmt);
 		}
 
-		if (self.chunk_count == 0) {
-			return;
-		}
-
-		self._arena.deinit();
-		allocator.destroy(self._arena);
+		self.arena.deinit();
+		allocator.destroy(self.arena);
 	}
 
-	pub fn changed(self: Rows) usize {
+	pub fn changed(self: *const Rows) usize {
 		return c.duckdb_rows_changed(self.result);
 	}
 
-	pub fn count(self: Rows) usize {
+	pub fn count(self: *const Rows) usize {
 		return c.duckdb_row_count(self.result);
 	}
 
-	pub fn columnName(self: Rows, i: usize) [*c]const u8 {
+	pub fn columnName(self: *const Rows, i: usize) [*c]const u8 {
 		return c.duckdb_column_name(self.result, i);
 	}
 
-	pub fn columnType(self: Rows, i: usize) DataType {
-		return DataType.fromDuckDBType(self.column_types[i]);
+	pub fn columnType(self: *const Rows, i: usize) DataType {
+		switch (self.vectors[i].type) {
+			.list => return .list,
+			.scalar => |s| switch (s) {
+				.@"enum" => return .@"enum",
+				.decimal => return .decimal,
+				.simple => |duckdb_type| return DataType.fromDuckDBType(duckdb_type),
+			}
+		}
 	}
 
 	pub fn next(self: *Rows) !?Row {
@@ -208,7 +183,7 @@ pub const Rows = struct {
 
 const t = std.testing;
 const DB = lib.DB;
-test "query column names" {
+test "rows: introspect" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
@@ -223,4 +198,7 @@ test "query column names" {
 	try t.expectEqual(2, rows.column_count);
 	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
 	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
+
+	try t.expectEqual(.i32, rows.columnType(0));
+	try t.expectEqual(.varchar, rows.columnType(1));
 }
