@@ -329,7 +329,7 @@ try appender.flush();
 The order of the values used in `appendRow` is the order of the columns as they are defined in the table (e.g. the order that `describe $table` returns).
 
 ## Appender per-column append
-The `appender.appendRow` function depends on the fact that you comptime knowledge of the underlying table. If you are dealing with dynamic (e.g. user-defined) schemas, that won't always be the case. Instead, use the more explicit `beginRow()`, `appendValue()` and `endRow()` calls. When using this api. When using this API, it isn't necessary to call `flush` (but you can if you want).
+The `appender.appendRow` function depends on the fact that you have comptime knowledge of the underlying table. If you are dealing with dynamic (e.g. user-defined) schemas, that won't always be the case. Instead, use the more explicit `beginRow()`, `appendValue()` and `endRow()` methods. When using this api. `endRow` will call `flush()` as needed, so using this API doesn't require a final `flush()`.
 
 ```zig
 for (...) {
@@ -344,12 +344,16 @@ for (...) {
 The `appendRow()` call translates to the above, more explicit, dance.
 
 ## Appender Type Support
-The appender supports the same basic types as the rest of the library.
+The appender writes directly to the underlying storage and thus cannot leverage default column values. `appendRow` asserts that the # of values matches the number of columns. However, when using the explicit `beginRow` + `appendValue` + `endRow`, you must make sure to append a value for each column, else the behavior is undefined. 
 
 Enums aren't supporting, due to [limitations in the DuckDB C API](https://github.com/duckdb/duckdb/pull/11704).
 
-One-dimension lists are upcoming.
-
 Decimals are supported, but be careful! When appending a float, the value will truncated to the decimal place specified by the scale of the column (i.e. a decimal(8, 3) will have the float truncated with 3 decimal places). When appending an int, the library assumes that you have already converted the decimal to the DuckDB internal representation. While surprising, this provides callers with precise control.
 
-Default values are [not supported](https://github.com/duckdb/duckdb/discussions/9158). Using either the `appendRow` API, or the more verbose `beingRow()` + `appendValue()` for each column + `endRow()`, you **must** set every column.
+When dealing with ints, floats and decimals, appending a single value tends to be flexible. In other words, you can append an `i64` to a `tinyint` column, so long as the value fits (i.e. there's a runtime check). However, when dealing with lists (e.g. `integer[]`), the exact type is required. Thus, only a `[]u16` can be bound to a `usmallint[]` column. `decimal[]` can bind to a `[]i64`, `[]f32` or `[]f64`.
+
+List columns support null values, and thus can be bound to either a `[]const T` or a `[]const ?T`.
+
+
+## Appender Error
+If any of the appender methods return an error, you can see if the optional `appender.err` has an error description. This is a `?[]const u8` field. On error, you **should not** assume that this value is set, there are error cases where DuckDB doesn't provide an error description.

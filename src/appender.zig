@@ -333,68 +333,12 @@ pub const Appender = struct {
 					switch (type_info) {
 						.Int, .ComptimeInt => {
 							if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("i64");
-							data[row_index] = .{.micros = @intCast(value)};
+							data[row_index] = @intCast(value);
 						},
 						else => return self.appendTypeError("timestamp", T)
 					}
 				},
-				.decimal => |d| switch (type_info) {
-					.Int, .ComptimeInt => switch (d.internal) {
-						.i16 => |data| {
-							if (value < lib.SMALLINT_MIN or value > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
-							data[row_index] = @intCast(value);
-						},
-						.i32 => |data| {
-							if (value < lib.INTEGER_MIN or value > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
-							data[row_index] = @intCast(value);
-						},
-						.i64 => |data| {
-							if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
-							data[row_index] = @intCast(value);
-						},
-						.i128 => |data| {
-							if (value < lib.HUGEINT_MIN or value > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
-							data[row_index] = @intCast(value);
-						},
-					},
-					.Float, .ComptimeFloat => {
-						// YES, there's a lot of duplication going on. But, I don't think the float and int codepaths can be merged
-						// without forcing int value to an i128, which seems wasteful to me.
-						const huge: i128 = switch (vector.type.scalar.decimal.scale) {
-							0 => @intFromFloat(value),
-							1 => @intFromFloat(value * 10),
-							2 => @intFromFloat(value * 100),
-							3 => @intFromFloat(value * 1000),
-							4 => @intFromFloat(value * 10000),
-							5 => @intFromFloat(value * 100000),
-							6 => @intFromFloat(value * 1000000),
-							7 => @intFromFloat(value * 10000000),
-							8 => @intFromFloat(value * 100000000),
-							9 => @intFromFloat(value * 1000000000),
-							10 => @intFromFloat(value * 10000000000),
-							else => |n| @intFromFloat(value * std.math.pow(f64, 10, @floatFromInt(n))),
-						};
-						switch (d.internal) {
-							.i16 => |data| {
-								if (huge < lib.SMALLINT_MIN or huge > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
-								data[row_index] = @intCast(huge);
-							},
-							.i32 => |data| {
-								if (huge < lib.INTEGER_MIN or huge > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
-								data[row_index] = @intCast(huge);
-							},
-							.i64 => |data| {
-								if (huge < lib.BIGINT_MIN or huge > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
-								data[row_index] = @intCast(huge);
-							},
-							.i128 => |data| {
-								if (huge < lib.HUGEINT_MIN or huge > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
-								data[row_index] = @intCast(huge);
-							},
-						}
-					},
-					else => return self.appendTypeError("decimal", T)
-				},
+				.decimal => |data| return self.setDecimal(value, data, row_index),
 				else => unreachable,
 			}
 		}
@@ -421,33 +365,34 @@ pub const Appender = struct {
 				}
 
 				switch (list.child) {
-					// .i8 => |data| if (T == []const i8) {
-					// 	@memcpy(data[size..new_size], values);
-					// } else if (T == []const ?i8) {
-					// 	for (values, size..) |value, i| {
-					// 		if (value) |v| data[i] = v
-					// 		else c.duckdb_validity_set_row_invalid(child_validity, i);
-					// 	}
-					// } else {
-					// 	return self.appendTypeError("tinyint[]", T);
-					// },
-					.i8 => |data| return self.setList(i8, "tinyint[]", list, values, data[size..new_size]),
-					.i16 => |data| return self.setList(i16, "smallint[]", list, values, data[size..new_size]),
-					.i32 => |data| return self.setList(i32, "integer[]", list, values, data[size..new_size]),
-					.i64 => |data| return self.setList(i64, "bigint[]", list, values, data[size..new_size]),
-					.i128 => |data| return self.setList(i128, "hugeint[]", list, values, data[size..new_size]),
-					.u8 => |data| return self.setList(u8, "utinyint[]", list, values, data[size..new_size]),
-					.u16 => |data| return self.setList(u16, "usmallint[]", list, values, data[size..new_size]),
-					.u32 => |data| return self.setList(u32, "uinteger[]", list, values, data[size..new_size]),
-					.u64 => |data| return self.setList(u64, "ubigint[]", list, values, data[size..new_size]),
-					.u128 => |data| return self.setList(u128, "uhugeint[]", list, values, data[size..new_size]),
-					.f32 => |data| return self.setList(f32, "real[]", list, values, data[size..new_size]),
-					.f64 => |data| return self.setList(f64, "doule[]", list, values, data[size..new_size]),
-					.bool => |data| return self.setList(bool, "bool[]", list, values, data[size..new_size]),
+					.i8 => |data| return self.setListDirect(i8, "tinyint[]", list, values, data[size..new_size]),
+					.i16 => |data| return self.setListDirect(i16, "smallint[]", list, values, data[size..new_size]),
+					.i32 => |data| return self.setListDirect(i32, "integer[]", list, values, data[size..new_size]),
+					.i64 => |data| return self.setListDirect(i64, "bigint[]", list, values, data[size..new_size]),
+					.i128 => |data| return self.setListDirect(i128, "hugeint[]", list, values, data[size..new_size]),
+					.u8 => |data| return self.setListDirect(u8, "utinyint[]", list, values, data[size..new_size]),
+					.u16 => |data| return self.setListDirect(u16, "usmallint[]", list, values, data[size..new_size]),
+					.u32 => |data| return self.setListDirect(u32, "uinteger[]", list, values, data[size..new_size]),
+					.u64 => |data| return self.setListDirect(u64, "ubigint[]", list, values, data[size..new_size]),
+					.u128 => |data| return self.setListDirect(u128, "uhugeint[]", list, values, data[size..new_size]),
+					.f32 => |data| return self.setListDirect(f32, "real[]", list, values, data[size..new_size]),
+					.f64 => |data| return self.setListDirect(f64, "doule[]", list, values, data[size..new_size]),
+					.bool => |data| return self.setListDirect(bool, "bool[]", list, values, data[size..new_size]),
+					.timestamp => |data| return self.setListDirect(i64, "timestamp[]", list, values, data[size..new_size]),
+					.interval => |data| return self.setListDirect(Interval, "interval[]", list, values, data[size..new_size]),
+					.date => |data| return self.setListTransform(Date, c.duckdb_date, "date", list, values, data[size..new_size], c.duckdb_to_date),
+					.time => |data| return self.setListTransform(Time, c.duckdb_time, "time", list, values, data[size..new_size], c.duckdb_to_time),
 					.blob, .varchar => if (T == []const []const u8 or T == []const []u8) {
 						const child_vector = list.child_vector;
 						for (values, size..) |value, i| {
 							c.duckdb_vector_assign_string_element_len(child_vector, i, value.ptr, value.len);
+						}
+					} else if (T == []const ?[]const u8 or T == []const ?[]u8) {
+						const child_vector = list.child_vector;
+						const child_validity = list.childValidity();
+						for (values, size..) |value, i| {
+							if (value) |v| { c.duckdb_vector_assign_string_element_len(child_vector, i, v.ptr, v.len); }
+							else { c.duckdb_validity_set_row_invalid(child_validity, i); }
 						}
 					} else {
 						return self.appendTypeError("text[] / blob[]", T);
@@ -456,20 +401,31 @@ pub const Appender = struct {
 						for (values, size..) |value, i| {
 							data[i] = try encodeUUID(value);
 						}
+					} else if (T == []const ?[]const u8 or T == []const ?[]u8) {
+						const child_validity = list.childValidity();
+						for (values, size..) |value, i| {
+							if (value) |v| { data[i] = try encodeUUID(v); }
+							else { c.duckdb_validity_set_row_invalid(child_validity, i); }
+						}
 					} else {
 						return self.appendTypeError("uuid[]", T);
 					},
-					else => unreachable,
-					// bool: [*c]bool,
-					// f32: [*c]f32,
-					// f64: [*c]f64,
-					// date: [*]c.duckdb_date,
-					// time: [*]c.duckdb_time,
-					// timestamp: [*]c.duckdb_timestamp,
-					// interval: [*]c.duckdb_interval,
-					// decimal: Vector.Decimal,
-					// uuid: [*c]i128,
-					// @"enum": Vector.Enum,
+					.decimal => |data| {
+						if (T == []const i64 or T == []const f32 or T == []const f64) {
+							for (values, size..) |value, i| {
+								try self.setDecimal(value, data, i);
+							}
+						} else if (T == []const ?i64 or T == []const ?f32 or T == []const ?f64) {
+							const child_validity = list.childValidity();
+							for (values, size..) |value, i| {
+								if (value) |v| { try self.setDecimal(v, data, i); }
+								else { c.duckdb_validity_set_row_invalid(child_validity, i); }
+							}
+						} else {
+							return self.appendTypeError("decimal[]", T);
+						}
+					},
+					inline else => |_, tag| return self.appendTypeError(@tagName(tag), T),
 				}
 			},
 			.scalar => |scalar| switch (scalar) {
@@ -490,12 +446,73 @@ pub const Appender = struct {
 						return self.appendTypeError("uuid", T);
 					}
 				},
-				else => return self.appendTypeError("???", T),
+				inline else => |_, tag| return self.appendTypeError(@tagName(tag), T),
 			},
 		}
 	}
 
-	fn setList(self: *Appender, comptime T: type, comptime column_type: []const u8, list: *Vector.List, values: anytype, data: anytype) !void {
+	fn setDecimal(self: *Appender, value: anytype, vector: Vector.Decimal, row_index: usize) !void {
+		const T = @TypeOf(value);
+		switch (@typeInfo(T)) {
+			.Int, .ComptimeInt => switch (vector.internal) {
+				.i16 => |data| {
+					if (value < lib.SMALLINT_MIN or value > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
+					data[row_index] = @intCast(value);
+				},
+				.i32 => |data| {
+					if (value < lib.INTEGER_MIN or value > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
+					data[row_index] = @intCast(value);
+				},
+				.i64 => |data| {
+					if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
+					data[row_index] = @intCast(value);
+				},
+				.i128 => |data| {
+					if (value < lib.HUGEINT_MIN or value > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
+					data[row_index] = @intCast(value);
+				},
+			},
+			.Float, .ComptimeFloat => {
+				// YES, there's a lot of duplication going on. But, I don't think the float and int codepaths can be merged
+				// without forcing int value to an i128, which seems wasteful to me.
+				const huge: i128 = switch (vector.scale) {
+					0 => @intFromFloat(value),
+					1 => @intFromFloat(value * 10),
+					2 => @intFromFloat(value * 100),
+					3 => @intFromFloat(value * 1000),
+					4 => @intFromFloat(value * 10000),
+					5 => @intFromFloat(value * 100000),
+					6 => @intFromFloat(value * 1000000),
+					7 => @intFromFloat(value * 10000000),
+					8 => @intFromFloat(value * 100000000),
+					9 => @intFromFloat(value * 1000000000),
+					10 => @intFromFloat(value * 10000000000),
+					else => |n| @intFromFloat(value * std.math.pow(f64, 10, @floatFromInt(n))),
+				};
+				switch (vector.internal) {
+					.i16 => |data| {
+						if (huge < lib.SMALLINT_MIN or huge > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
+						data[row_index] = @intCast(huge);
+					},
+					.i32 => |data| {
+						if (huge < lib.INTEGER_MIN or huge > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
+						data[row_index] = @intCast(huge);
+					},
+					.i64 => |data| {
+						if (huge < lib.BIGINT_MIN or huge > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
+						data[row_index] = @intCast(huge);
+					},
+					.i128 => |data| {
+						if (huge < lib.HUGEINT_MIN or huge > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
+						data[row_index] = @intCast(huge);
+					},
+				}
+			},
+			else => return self.appendTypeError("decimal", T)
+		}
+	}
+
+	fn setListDirect(self: *Appender, comptime T: type, comptime column_type: []const u8, list: *Vector.List, values: anytype, data: anytype) !void {
 		if (@TypeOf(values) == []const T) {
 			@memcpy(data, values);
 			return;
@@ -515,6 +532,38 @@ pub const Appender = struct {
 			for (values, 0..) |value, i| {
 				if (value) |v| {
 					data[i] = v;
+				} else {
+					c.duckdb_validity_set_row_invalid(validity, validity_start + i);
+				}
+			}
+			return;
+		}
+
+		return self.appendTypeError(column_type, @TypeOf(values));
+	}
+
+	fn setListTransform(self: *Appender, comptime T: type, comptime D: type, comptime column_type: []const u8, list: *Vector.List, values: anytype, data: anytype, transform: *const fn(T) callconv(.C) D) !void {
+		if (@TypeOf(values) == []const T) {
+			for (values, 0..) |value, i| {
+				data[i] = transform(value);
+			}
+			return;
+		}
+
+		if (@TypeOf(values) == []const ?T) {
+			const validity = list.child_validity orelse blk: {
+				const child_vector = list.child_vector;
+				c.duckdb_vector_ensure_validity_writable(child_vector);
+				const v = c.duckdb_vector_get_validity(child_vector);
+				list.child_validity = v;
+				break :blk v;
+			};
+
+			const validity_start = list.size - values.len;
+
+			for (values, 0..) |value, i| {
+				if (value) |v| {
+					data[i] = transform(v);
 				} else {
 					c.duckdb_validity_set_row_invalid(validity, validity_start + i);
 				}
@@ -952,6 +1001,11 @@ test "Appender: list simple types" {
 		\\  col_bool bool[],
 		\\  col_text text[],
 		\\  col_uuid uuid[],
+		\\  col_date date[],
+		\\  col_time time[],
+		\\  col_timestamp timestamp[],
+		\\  col_interval interval[],
+		\\  col_decimal decimal(18, 6)[],
 		\\ )
 	, .{});
 
@@ -975,9 +1029,14 @@ test "Appender: list simple types" {
 			&[_]f64{-1.02, 9999.1303, 0.0, -8288133.11},
 			&[_]bool{true, false, true, true, false},
 			&[_][]const u8{"hello", "world"},
-			[2][]const u8{"eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &[_]u8{204, 193, 82, 169, 150, 64, 52, 71, 92, 228, 173, 248, 223, 220, 70, 252}}
+			[2][]const u8{"eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &[_]u8{204, 193, 82, 169, 150, 64, 52, 71, 92, 228, 173, 248, 223, 220, 70, 252}},
+			&[_]lib.Date{.{.year = 2023, .month = 5, .day = 10}, .{.year = 1901, .month = 2, .day = 3}},
+			&[_]lib.Time{.{.hour = 10, .min = 44, .sec = 23, .micros = 123456}, .{.hour = 20, .min = 2, .sec = 5, .micros = 2}},
+			&[_]i64{0, -1, 17135818900221234},
+			&[_]lib.Interval{.{.months = 3, .days = 7, .micros = 982810}, .{.months = 1, .days = 2, .micros = 3}},
+			&[_]f64{3.1234, -0.00002},
 		});
-		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null});
+		try appender.appendRow(.{2, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null});
 		try appender.appendRow(.{
 			3,
 			&[_]?i8{-1, null, 9},
@@ -993,8 +1052,13 @@ test "Appender: list simple types" {
 			&[_]?f32{0.0, null, 0.1},
 			&[_]?f64{0.9999, null, null},
 			&[_]?bool{false, null, true},
-			&[_][]const u8{"hello", "world"},
-			[2][]const u8{"eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &[_]u8{204, 193, 82, 169, 150, 64, 52, 71, 92, 228, 173, 248, 223, 220, 70, 252}}
+			&[_]?[]const u8{"hello", null, "world", null},
+			[_]?[]const u8{"eadc5eb8-dd6b-4c55-9c9b-b19c76048c3d", null, "FFFFFFFF-dd6b-4c55-9c9b-aaaaaaaaaaaa", &[_]u8{2, 193, 82, 169, 150, 64, 52, 71, 92, 228, 173, 248, 223, 220, 70, 1}, null},
+			&[_]?lib.Date{.{.year = 2023, .month = 5, .day = 10}, null},
+			&[_]?lib.Time{null, null, .{.hour = 20, .min = 2, .sec = 5, .micros = 2}},
+			&[_]?i64{0, null, null, 27135818900221234},
+			&[_]?lib.Interval{.{.months = 3, .days = 7, .micros = 982810}, null, null},
+			&[_]?f64{3.1234, null},
 		});
 		try appender.flush();
 	}
@@ -1003,19 +1067,19 @@ test "Appender: list simple types" {
 		var row = (try conn.row("select * from applist where id = 1", .{})).?;
 		defer row.deinit();
 
-		try assertList(&[_]?i8{-128, 0, 100, 127}, row.list(i8, 1).?);
-		try assertList(&[_]?i16{-32768, 0, -299, 32767}, row.list(?i16, 2).?);
-		try assertList(&[_]?i32{-2147483648, -4933, 0, 2147483647}, row.list(?i32, 3).?);
-		try assertList(&[_]?i64{-9223372036854775808, -8223372036854775800, 0, 9223372036854775807}, row.list(?i64, 4).?);
-		try assertList(&[_]?i128{-170141183460469231731687303715884105728, -1, 2, 170141183460469231731687303715884105727}, row.list(?i128, 5).?);
-		try assertList(&[_]?u8{0, 200, 255}, row.list(?u8, 6).?);
-		try assertList(&[_]?u16{0, 65535}, row.list(?u16, 7).?);
-		try assertList(&[_]?u32{0, 4294967294, 4294967295}, row.list(?u32, 8).?);
-		try assertList(&[_]?u64{0, 18446744073709551615}, row.list(?u64, 9).?);
-		try assertList(&[_]?u128{0, 99999999999999999999998, 340282366920938463463374607431768211455}, row.list(?u128, 10).?);
-		try assertList(&[_]?f32{-1.0, 3.44, 0.0, 99.9991}, row.list(?f32, 11).?);
-		try assertList(&[_]?f64{-1.02, 9999.1303, 0.0, -8288133.11}, row.list(?f64, 12).?);
-		try assertList(&[_]?bool{true, false, true, true, false}, row.list(?bool, 13).?);
+		try assertList(&[_]i8{-128, 0, 100, 127}, row.list(i8, 1).?);
+		try assertList(&[_]i16{-32768, 0, -299, 32767}, row.list(i16, 2).?);
+		try assertList(&[_]i32{-2147483648, -4933, 0, 2147483647}, row.list(i32, 3).?);
+		try assertList(&[_]i64{-9223372036854775808, -8223372036854775800, 0, 9223372036854775807}, row.list(i64, 4).?);
+		try assertList(&[_]i128{-170141183460469231731687303715884105728, -1, 2, 170141183460469231731687303715884105727}, row.list(i128, 5).?);
+		try assertList(&[_]u8{0, 200, 255}, row.list(u8, 6).?);
+		try assertList(&[_]u16{0, 65535}, row.list(u16, 7).?);
+		try assertList(&[_]u32{0, 4294967294, 4294967295}, row.list(u32, 8).?);
+		try assertList(&[_]u64{0, 18446744073709551615}, row.list(u64, 9).?);
+		try assertList(&[_]u128{0, 99999999999999999999998, 340282366920938463463374607431768211455}, row.list(u128, 10).?);
+		try assertList(&[_]f32{-1.0, 3.44, 0.0, 99.9991}, row.list(f32, 11).?);
+		try assertList(&[_]f64{-1.02, 9999.1303, 0.0, -8288133.11}, row.list(f64, 12).?);
+		try assertList(&[_]bool{true, false, true, true, false}, row.list(bool, 13).?);
 
 		const list_texts = row.list([]u8, 14).?;
 		try t.expectEqualStrings("hello", list_texts.get(0));
@@ -1024,6 +1088,14 @@ test "Appender: list simple types" {
 		const list_uuids = row.list(lib.UUID, 15).?;
 		try t.expectEqualStrings("eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &list_uuids.get(0));
 		try t.expectEqualStrings("ccc152a9-9640-3447-5ce4-adf8dfdc46fc", &list_uuids.get(1));
+
+		try assertList(&[_]lib.Date{.{.year = 2023, .month = 5, .day = 10}, .{.year = 1901, .month = 2, .day = 3}}, row.list(lib.Date, 16).?);
+		try assertList(&[_]lib.Time{.{.hour = 10, .min = 44, .sec = 23, .micros = 123456}, .{.hour = 20, .min = 2, .sec = 5, .micros = 2}}, row.list(lib.Time, 17).?);
+
+		// timestamp
+		try assertList(&[_]i64{0, -1, 17135818900221234}, row.list(i64, 18).?);
+		try assertList(&[_]lib.Interval{.{.months = 3, .days = 7, .micros = 982810}, .{.months = 1, .days = 2, .micros = 3}}, row.list(lib.Interval, 19).?);
+		try assertList(&[_]f64{3.1234, -0.00002}, row.list(f64, 20).?);
 	}
 
 	{
@@ -1043,7 +1115,12 @@ test "Appender: list simple types" {
 		try t.expectEqual(null, row.list(?f64, 12));
 		try t.expectEqual(null, row.list(?bool, 13));
 		try t.expectEqual(null, row.list(?[]const u8, 14));
-		try t.expectEqual(null, row.list(?[]const u8, 15));
+		try t.expectEqual(null, row.list(?lib.UUID, 15));
+		try t.expectEqual(null, row.list(?lib.Date, 16));
+		try t.expectEqual(null, row.list(?lib.Time, 17));
+		try t.expectEqual(null, row.list(?i64, 18));
+		try t.expectEqual(null, row.list(?i64, 19));
+		try t.expectEqual(null, row.list(?f64, 20));
 	}
 
 	{
@@ -1064,25 +1141,29 @@ test "Appender: list simple types" {
 		try assertList(&[_]?f64{0.9999, null, null}, row.list(?f64, 12).?);
 		try assertList(&[_]?bool{false, null, true}, row.list(?bool, 13).?);
 
-		// const list_texts = row.list([]u8, 14).?;
-		// try t.expectEqualStrings("hello", list_texts.get(0));
-		// try t.expectEqualStrings("world", list_texts.get(1));
+		const list_texts = row.list(?[]u8, 14).?;
+		try t.expectEqualStrings("hello", list_texts.get(0).?);
+		try t.expectEqual(null, list_texts.get(1));
+		try t.expectEqualStrings("world", list_texts.get(2).?);
+		try t.expectEqual(null, list_texts.get(3));
 
-		// const list_uuids = row.list(lib.UUID, 15).?;
-		// try t.expectEqualStrings("eadc5eb8-dd6b-4c55-9c9b-b19c76048c32", &list_uuids.get(0));
-		// try t.expectEqualStrings("ccc152a9-9640-3447-5ce4-adf8dfdc46fc", &list_uuids.get(1));
-	}
-}
+		const list_uuids = row.list(?lib.UUID, 15).?;
+		try t.expectEqualStrings("eadc5eb8-dd6b-4c55-9c9b-b19c76048c3d", &(list_uuids.get(0).?));
+		try t.expectEqual(null, list_uuids.get(1));
+		try t.expectEqualStrings("ffffffff-dd6b-4c55-9c9b-aaaaaaaaaaaa", &(list_uuids.get(2).?));
+		try t.expectEqualStrings("02c152a9-9640-3447-5ce4-adf8dfdc4601", &(list_uuids.get(3).?));
+		try t.expectEqual(null, list_uuids.get(4));
 
-fn assertList(expected: anytype, actual: anytype) !void {
-	try t.expectEqual(expected.len, actual.len);
-	for (expected, 0..) |e, i| {
-		try t.expectEqual(e, actual.get(i));
+		try assertList(&[_]?lib.Date{.{.year = 2023, .month = 5, .day = 10}, null}, row.list(?lib.Date, 16).?);
+		try assertList(&[_]?lib.Time{null, null, .{.hour = 20, .min = 2, .sec = 5, .micros = 2}}, row.list(?lib.Time, 17).?);
+		try assertList(&[_]?i64{0, null, null, 27135818900221234}, row.list(?i64, 18).?);
+		try assertList(&[_]?lib.Interval{.{.months = 3, .days = 7, .micros = 982810}, null, null}, row.list(?lib.Interval, 19).?);
+		try assertList(&[_]?f64{3.1234, null}, row.list(?f64, 20).?);
 	}
 }
 
 test "Appender: list multiple" {
-const db = try DB.init(t.allocator, ":memory:", .{});
+	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
 
 	var conn = try db.conn();
@@ -1110,6 +1191,13 @@ const db = try DB.init(t.allocator, ":memory:", .{});
 		i += 1;
 	}
 	try t.expectEqual(10, i);
+}
+
+fn assertList(expected: anytype, actual: anytype) !void {
+	try t.expectEqual(expected.len, actual.len);
+	for (expected, 0..) |e, i| {
+		try t.expectEqual(e, actual.get(i));
+	}
 }
 
 // test "Appender: enum" {

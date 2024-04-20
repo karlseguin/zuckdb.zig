@@ -222,7 +222,7 @@ fn getScalar(comptime T: type, scalar: Vector.Scalar, index: usize, col: usize) 
 		i32 => return scalar.i32[index],
 		i64 => switch (scalar) {
 			.i64 => |vc| return vc[index],
-			.timestamp => |vc| return vc[index].micros,
+			.timestamp => |vc| return vc[index],
 			else => unreachable,
 		},
 		i128 => return scalar.i128[index],

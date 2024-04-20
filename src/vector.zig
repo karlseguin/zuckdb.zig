@@ -173,7 +173,7 @@ pub const Vector = struct {
 		varchar: [*]c.duckdb_string_t,
 		date: [*]c.duckdb_date,
 		time: [*]c.duckdb_time,
-		timestamp: [*]c.duckdb_timestamp,
+		timestamp: [*]i64,
 		interval: [*]c.duckdb_interval,
 		decimal: Vector.Decimal,
 		uuid: [*c]i128,
@@ -209,6 +209,17 @@ pub const Vector = struct {
 
 		// used when appender when writing a null child
 		child_validity: ?[*c]u64 = null,
+
+		pub fn childValidity(self: *List) [*c]u64 {
+			if (self.child_validity) |cv| {
+				return cv;
+			}
+			const child_vector = self.child_vector;
+			c.duckdb_vector_ensure_validity_writable(child_vector);
+			const validity = c.duckdb_vector_get_validity(child_vector);
+			self.child_validity = validity;
+			return validity;
+		}
 	};
 
 	pub const Enum = struct {
