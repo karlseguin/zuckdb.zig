@@ -10,6 +10,7 @@ pub const Rows = lib.Rows;
 pub const Conn = lib.Conn;
 pub const Pool = lib.Pool;
 pub const Stmt = lib.Stmt;
+pub const Vector = lib.Vector;
 pub const Appender = lib.Appender;
 pub const LazyList = lib.LazyList;
 pub const OwningRow = lib.OwningRow;
