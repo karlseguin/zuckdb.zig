@@ -354,6 +354,5 @@ When dealing with ints, floats and decimals, appending a single value tends to b
 
 List columns support null values, and thus can be bound to either a `[]const T` or a `[]const ?T`.
 
-
 ## Appender Error
 If any of the appender methods return an error, you can see if the optional `appender.err` has an error description. This is a `?[]const u8` field. On error, you **should not** assume that this value is set, there are error cases where DuckDB doesn't provide an error description.

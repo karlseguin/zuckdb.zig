@@ -199,6 +199,26 @@ test "rows: introspect" {
 	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
 	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
 
-try t.expectEqual(.integer, rows.columnType(0));
+	try t.expectEqual(.integer, rows.columnType(0));
+	try t.expectEqual(.varchar, rows.columnType(1));
+}
+
+test "rows: introspect empty" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table test(id integer, name varchar);", .{});
+
+	const rows = try conn.query("select id, name from test where false", .{});
+	defer rows.deinit();
+
+	try t.expectEqual(2, rows.column_count);
+	try t.expectEqualStrings("id", std.mem.span(rows.columnName(0)));
+	try t.expectEqualStrings("name", std.mem.span(rows.columnName(1)));
+
+	try t.expectEqual(.integer, rows.columnType(0));
 	try t.expectEqual(.varchar, rows.columnType(1));
 }

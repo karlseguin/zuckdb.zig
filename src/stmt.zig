@@ -21,6 +21,38 @@ pub const Stmt = struct {
 	auto_release: bool,
 	stmt: *c.duckdb_prepared_statement,
 
+	pub const StatementType = enum {
+		invalid,
+		select,
+		insert,
+		update,
+		explain,
+		delete,
+		prepare,
+		create,
+		execute,
+		alter,
+		transaction,
+		copy,
+		analyze,
+		variable_set,
+		create_func,
+		drop,
+		@"export",
+		pragma,
+		vacuum,
+		call,
+		set,
+		load,
+		relation,
+		extension,
+		logical_plan,
+		attach,
+		detach,
+		multi,
+		unknown,
+	};
+
 	pub const Opts = struct {
 		auto_release: bool = false,
 	};
@@ -43,6 +75,40 @@ pub const Stmt = struct {
 		if (c.duckdb_clear_bindings(self.stmt.*) == DuckDBError) {
 			return error.DuckDBError;
 		}
+	}
+
+	pub fn statementType(self: *const Stmt) StatementType {
+		return switch (c.duckdb_prepared_statement_type(self.stmt.*)) {
+			c.DUCKDB_STATEMENT_TYPE_INVALID => .invalid,
+			c.DUCKDB_STATEMENT_TYPE_SELECT => .select,
+			c.DUCKDB_STATEMENT_TYPE_INSERT => .insert,
+			c.DUCKDB_STATEMENT_TYPE_UPDATE => .update,
+			c.DUCKDB_STATEMENT_TYPE_EXPLAIN => .explain,
+			c.DUCKDB_STATEMENT_TYPE_DELETE => .delete,
+			c.DUCKDB_STATEMENT_TYPE_PREPARE => .prepare,
+			c.DUCKDB_STATEMENT_TYPE_CREATE => .create,
+			c.DUCKDB_STATEMENT_TYPE_EXECUTE => .execute,
+			c.DUCKDB_STATEMENT_TYPE_ALTER => .alter,
+			c.DUCKDB_STATEMENT_TYPE_TRANSACTION => .transaction,
+			c.DUCKDB_STATEMENT_TYPE_COPY => .copy,
+			c.DUCKDB_STATEMENT_TYPE_ANALYZE => .analyze,
+			c.DUCKDB_STATEMENT_TYPE_VARIABLE_SET => .variable_set,
+			c.DUCKDB_STATEMENT_TYPE_CREATE_FUNC => .create_func,
+			c.DUCKDB_STATEMENT_TYPE_DROP => .drop,
+			c.DUCKDB_STATEMENT_TYPE_EXPORT => .@"export",
+			c.DUCKDB_STATEMENT_TYPE_PRAGMA => .pragma,
+			c.DUCKDB_STATEMENT_TYPE_VACUUM => .vacuum,
+			c.DUCKDB_STATEMENT_TYPE_CALL => .call,
+			c.DUCKDB_STATEMENT_TYPE_SET => .set,
+			c.DUCKDB_STATEMENT_TYPE_LOAD => .load,
+			c.DUCKDB_STATEMENT_TYPE_RELATION => .relation,
+			c.DUCKDB_STATEMENT_TYPE_EXTENSION => .extension,
+			c.DUCKDB_STATEMENT_TYPE_LOGICAL_PLAN => .logical_plan,
+			c.DUCKDB_STATEMENT_TYPE_ATTACH => .attach,
+			c.DUCKDB_STATEMENT_TYPE_DETACH => .detach,
+			c.DUCKDB_STATEMENT_TYPE_MULTI => .multi,
+			else => .unknown,
+		};
 	}
 
 	pub fn bind(self: *const Stmt, values: anytype) !void {
@@ -625,4 +691,43 @@ test "Stmt: exec" {
 	try t.expectEqual(2, (try rows.next()).?.get(i32, 0));
 	try t.expectEqual(3, (try rows.next()).?.get(i32, 0));
 	try t.expectEqual(null, try rows.next());
+}
+
+test "Stmt: statementType" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	{
+		const stmt = try conn.prepare("create table exec(id integer)", .{});
+		defer stmt.deinit();
+		_ = try stmt.exec();
+		try t.expectEqual(.create, stmt.statementType());
+	}
+
+	{
+		const stmt = try conn.prepare("select * from exec", .{});
+		defer stmt.deinit();
+		try t.expectEqual(.select, stmt.statementType());
+	}
+
+	{
+		const stmt = try conn.prepare("update exec set id = 3", .{});
+		defer stmt.deinit();
+		try t.expectEqual(.update, stmt.statementType());
+	}
+
+	{
+		const stmt = try conn.prepare("delete from exec", .{});
+		defer stmt.deinit();
+		try t.expectEqual(.delete, stmt.statementType());
+	}
+
+	{
+		const stmt = try conn.prepare("drop table exec", .{});
+		defer stmt.deinit();
+		try t.expectEqual(.drop, stmt.statementType());
+	}
 }
