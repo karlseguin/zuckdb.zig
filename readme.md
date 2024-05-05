@@ -99,7 +99,7 @@ Creates or opens the database.
 
 ```zig
 // can use the special path ":memory:" for an in-memory database
-const db = try DB.init(t.allocator, "/tmp/db.duckdb", .{});
+const db = try DB.init(allocator, "/tmp/db.duckdb", .{});
 defer db.deinit();
 ```
 
