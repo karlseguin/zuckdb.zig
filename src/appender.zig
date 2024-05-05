@@ -1007,6 +1007,27 @@ test "Appender: decimal fuzz" {
 	try t.expectEqual(COUNT, i);
 }
 
+test "Appender: json" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table aj (id integer, data json)", .{});
+
+	{
+		var appender = try conn.appender(null, "aj");
+		defer appender.deinit();
+		try appender.appendRow(.{1, "{\"id\":1,\"x\":true}"});
+		try appender.flush();
+
+		var row = (try conn.row("select data from aj where id = 1", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("{\"id\":1,\"x\":true}", row.get([]u8, 0));
+	}
+}
+
 test "Appender: list simple types" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
