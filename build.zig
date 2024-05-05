@@ -9,16 +9,16 @@ pub fn build(b: *std.Build) !void {
 	const lib_path = b.path("lib");
 
 	_ = b.addModule("zuckdb", .{
-		.root_source_file = .{ .path = "src/zuckdb.zig" },
+		.root_source_file = b.path("src/zuckdb.zig"),
 	});
 
 	{
 		// Setup Tests
 		const lib_test = b.addTest(.{
-			.root_source_file = .{ .path = "src/zuckdb.zig" },
+			.root_source_file = b.path("src/zuckdb.zig"),
 			.target = target,
 			.optimize = optimize,
-			.test_runner = .{.path = "test_runner.zig"},
+			.test_runner = b.path("test_runner.zig"),
 		});
 
 		lib_test.addRPath(lib_path);

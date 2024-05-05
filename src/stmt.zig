@@ -118,7 +118,7 @@ pub const Stmt = struct {
 		}
 	}
 
-	pub fn bindValue(self: *const Stmt, i: usize, value: anytype) !void {
+	pub fn bindValue(self: *const Stmt, value: anytype, i: usize) !void {
 		_ = try M.bindValue(@TypeOf(value), self.stmt.*, value, i+1);
 	}
 
@@ -577,9 +577,9 @@ test "bind: dynamic" {
 
 	var stmt = try conn.prepare("select $1::int, $2::varchar, $3::smallint", .{});
 	defer stmt.deinit();
-	try stmt.bindValue(0, null);
-	try stmt.bindValue(1, "over");
-	try stmt.bindValue(2, 9000);
+	try stmt.bindValue(null, 0);
+	try stmt.bindValue("over", 1);
+	try stmt.bindValue(9000, 2);
 
 	var rows = try stmt.query(null);
 	defer rows.deinit();
@@ -676,12 +676,12 @@ test "Stmt: exec" {
 	{
 		const stmt = try conn.prepare("insert into exec (id) values ($1)", .{});
 		defer stmt.deinit();
-		try stmt.bindValue(0, 2);
+		try stmt.bindValue(2, 0);
 		try t.expectEqual(1, try stmt.exec());
 
 		try stmt.clearBindings();
 
-		try stmt.bindValue(0, 3);
+		try stmt.bindValue(3, 0);
 		try t.expectEqual(1, try stmt.exec());
 	}
 
