@@ -268,7 +268,7 @@ fn getScalar(comptime T: type, scalar: Vector.Scalar, index: usize, col: usize) 
 
 fn getBlob(scalar: Vector.Scalar, index: usize) []u8 {
 	switch (scalar) {
-		.blob => |vc| {
+		.blob, .varchar => |vc| {
 			// This sucks. This is an untagged union. But both versions (inlined and pointer)
 			// have the same leading 8 bytes, including the length which is the first 4 bytes.
 			// There is a c.duckdb_string_is_inlined that we could use instead of hard-coding

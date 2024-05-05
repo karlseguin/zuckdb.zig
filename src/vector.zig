@@ -281,7 +281,8 @@ fn scalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Ve
 			}};
 		},
 		.simple => |s| switch (s) {
-			c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT => return .{ .blob = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_BIT => return .{ .blob = @ptrCast(@alignCast(raw_data)) },
+			c.DUCKDB_TYPE_VARCHAR => return .{ .varchar = @ptrCast(@alignCast(raw_data)) },
 			c.DUCKDB_TYPE_TINYINT => return .{ .i8 = @ptrCast(raw_data) },
 			c.DUCKDB_TYPE_SMALLINT => return .{ .i16 = @ptrCast(@alignCast(raw_data)) },
 			c.DUCKDB_TYPE_INTEGER => return .{ .i32 = @ptrCast(@alignCast(raw_data)) },

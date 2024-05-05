@@ -346,6 +346,23 @@ pub const Appender = struct {
 					}
 				},
 				.decimal => |data| return self.setDecimal(value, data, row_index),
+				.varchar => {
+					var buf: [std.fmt.format_float.min_buffer_size]u8 = undefined;
+					const v = switch (type_info) {
+						.Int, .ComptimeInt => blk: {
+							const n = std.fmt.formatIntBuf(&buf, value, 10, .lower, .{});
+							break :blk buf[0..n];
+						},
+						.Float, .ComptimeFloat => try std.fmt.formatFloat(&buf, value, .{}),
+						.Bool => if (value == true) "true" else "false",
+						else => {
+							const err = try std.fmt.allocPrint(self.allocator, "cannot bind a {any} (type {s}) to a varchar column", .{value, @typeName(T)});
+							self.setErr(err, true);
+							return error.AppendError;
+						},
+					};
+					c.duckdb_vector_assign_string_element_len(vector.vector, row_index, v.ptr, v.len);
+				},
 				else => {
 					const err = try std.fmt.allocPrint(self.allocator, "cannot bind a {any} (type {s}) to a column of type {s}", .{value, @typeName(T), @tagName(std.meta.activeTag(scalar))});
 					self.setErr(err, true);
@@ -790,6 +807,68 @@ test "Appender: basic variants" {
 		defer row.deinit();
 		try t.expectEqual(null, row.get(?bool, 1));
 		try t.expectEqual(null, row.get(?lib.UUID, 2));
+	}
+}
+
+test "Appender: int/float/bool into varchar and json" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec(
+		\\ create table x (
+		\\   id integer,
+		\\   a varchar,
+		\\   b json
+		\\ )
+	, .{});
+
+	var appender = try conn.appender(null, "x");
+	defer appender.deinit();
+	try appender.appendRow(.{1, @as(i32, -39991), @as(f64, 3.14159)});
+	try appender.appendRow(.{2, @as(f32, 0.991), @as(u16, 1025)});
+	try appender.appendRow(.{3, 1234, 5.6789});
+	try appender.appendRow(.{4, -987.65, -5432});
+	try appender.appendRow(.{5, true, false});
+	try appender.flush();
+
+	try t.expectEqual(null, appender.err);
+
+	{
+		var row = (try conn.row("select a, b from x where id = 1", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("-39991", row.get([]u8, 0));
+		try t.expectEqualStrings("3.14159e0", row.get([]u8, 1));
+	}
+
+	{
+		var row = (try conn.row("select a, b from x where id = 2", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("9.91e-1", row.get([]u8, 0));
+		try t.expectEqualStrings("1025", row.get([]u8, 1));
+	}
+
+	{
+		var row = (try conn.row("select a, b from x where id = 3", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("1234", row.get([]u8, 0));
+		try t.expectEqualStrings("5.6789e0", row.get([]u8, 1));
+	}
+
+	{
+		var row = (try conn.row("select a, b from x where id = 4", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("-9.8765e2", row.get([]u8, 0));
+		try t.expectEqualStrings("-5432", row.get([]u8, 1));
+	}
+
+	{
+		var row = (try conn.row("select a, b from x where id = 5", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("true", row.get([]u8, 0));
+		try t.expectEqualStrings("false", row.get([]u8, 1));
 	}
 }
 
