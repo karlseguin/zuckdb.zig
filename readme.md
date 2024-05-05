@@ -360,9 +360,9 @@ The `appender.appendRow` function depends on the fact that you have comptime kno
 ```zig
 for (...) {
     appender.beginRow();
-    appender.appendValue("over", 0);
-    appender.appendValue(9001, 1);
-    appender.appendValue(true, 2);
+    try appender.appendValue("over", 0);
+    try appender.appendValue(9001, 1);
+    try appender.appendValue(true, 2);
     try appender.endRow();
 }
 ```

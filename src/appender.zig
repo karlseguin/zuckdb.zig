@@ -13,6 +13,12 @@ pub const Appender = struct {
 	// Error message, if any
 	err: ?[]const u8,
 
+	// whether or not we own the error. The underlying duckdb appender error is
+	// owned by the the duckdb appender itself, so we don't need to manage it.
+	// but sometimes we create our own error message, in which case we have to
+	// free it.
+	own_err: bool,
+
 	// the row of the current chunk that we're writing at
 	row_index: usize,
 
@@ -68,6 +74,7 @@ pub const Appender = struct {
 
 		return .{
 			.err = null,
+			.own_err = false,
 			.row_index = 0,
 			.types = types,
 			.vectors = vectors,
@@ -116,14 +123,14 @@ pub const Appender = struct {
 		const appender = self.appender;
 		if (c.duckdb_append_data_chunk(appender.*, data_chunk) == DuckDBError) {
 			if (c.duckdb_appender_error(appender.*)) |c_err| {
-				self.err = std.mem.span(c_err);
+				self.setErr(std.mem.span(c_err), false);
 			}
 			return error.DuckDBError;
 		}
 
 		if (c.duckdb_appender_flush(self.appender.*) == DuckDBError) {
 			if (c.duckdb_appender_error(appender.*)) |c_err| {
-				self.err = std.mem.span(c_err);
+				self.setErr(std.mem.span(c_err), false);
 			}
 			return error.DuckDBError;
 		}
@@ -339,9 +346,22 @@ pub const Appender = struct {
 					}
 				},
 				.decimal => |data| return self.setDecimal(value, data, row_index),
-				else => unreachable,
+				else => {
+					const err = try std.fmt.allocPrint(self.allocator, "cannot bind a {any} (type {s}) to a column of type {s}", .{value, @typeName(T), @tagName(std.meta.activeTag(scalar))});
+					self.setErr(err, true);
+					return error.AppendError;
+				}
 			}
 		}
+	}
+
+	pub fn clearError(self: *Appender) !void {
+		const e = self.err orelse return;
+		if (self.own_err) {
+			self.allocator.free(e);
+		}
+		self.err = null;
+		self.own_err = false;
 	}
 
 	fn appendSlice(self: *Appender, vector: *Vector, values: anytype, row_index: usize) !void {
@@ -358,9 +378,11 @@ pub const Appender = struct {
 				};
 
 				if (c.duckdb_list_vector_set_size(vector.vector, new_size) == DuckDBError) {
+					self.setErr("failed to set vector size", false);
 					return error.DuckDBError;
 				}
 				if (c.duckdb_list_vector_reserve(vector.vector, new_size) == DuckDBError) {
+					self.setErr("failed to reserve vector space", false);
 					return error.DuckDBError;
 				}
 
@@ -575,13 +597,22 @@ pub const Appender = struct {
 	}
 
 	fn appendTypeError(self: *Appender, comptime data_type: []const u8, value_type: type) error{AppendError} {
-		self.err = "cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ data_type;
+		self.setErr("cannot bind a " ++ @typeName(value_type) ++ " to a column of type " ++ data_type, false);
 		return error.AppendError;
 	}
 
 	fn appendIntRangeError(self: *Appender, comptime data_type: []const u8) error{AppendError} {
-		self.err = "value is outside of range for a column of type " ++ data_type;
+		self.setErr("value is outside of range for a column of type " ++ data_type, false);
 		return error.AppendError;
+	}
+
+	fn setErr(self: *Appender, err: []const u8, own: bool) void {
+		// free any previous owned error we have
+		if (self.own_err) {
+			self.allocator.free(self.err.?);
+		}
+		self.err = err;
+		self.own_err = own;
 	}
 };
 
@@ -1191,6 +1222,46 @@ test "Appender: list multiple" {
 		i += 1;
 	}
 	try t.expectEqual(10, i);
+}
+
+test "Appender: incomplete row" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table app_x (id integer)", .{});
+
+	{
+		var appender = try conn.appender(null, "app_x");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.endRow();
+
+		appender.beginRow();
+		try appender.appendValue(2, 0);
+		try appender.endRow();
+
+		appender.beginRow();
+		try appender.appendValue(3, 0);
+
+		// we fllush without finishing the above row. That's fine, the row should
+		// be abandoned.
+		try appender.flush();
+	}
+
+	var rows = try conn.query("select id from app_x order by id", .{});
+	defer rows.deinit();
+
+	var i: i32 = 0;
+	while (try rows.next()) |row| {
+		try t.expectEqual(i+1, row.get(i32, 0));
+		i += 1;
+	}
+	try t.expectEqual(2, i);
 }
 
 fn assertList(expected: anytype, actual: anytype) !void {
