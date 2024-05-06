@@ -355,8 +355,7 @@ try appender.flush();
 The order of the values used in `appendRow` is the order of the columns as they are defined in the table (e.g. the order that `describe $table` returns).
 
 ## Appender per-column append
-The `appender.appendRow` function depends on the fact that you have comptime knowledge of the underlying table. If you are dealing with dynamic (e.g. user-defined) schemas, that won't always be the case. Instead, use the more explicit `beginRow()`, `appendValue()` and `endRow()` methods. When using this api. `endRow` will call `flush()` as needed, so using this API doesn't require a final `flush()`.
-
+The `appender.appendRow` function depends on the fact that you have comptime knowledge of the underlying table. If you are dealing with dynamic (e.g. user-defined) schemas, that won't always be the case. Instead, use the more explicit `beginRow()`, `appendValue()` and `endRow()` methods. 
 ```zig
 for (...) {
     appender.beginRow();
@@ -365,9 +364,10 @@ for (...) {
     try appender.appendValue(true, 2);
     try appender.endRow();
 }
+try appender.flush();
 ```
 
-The `appendRow()` call translates to the above, more explicit, dance.
+The `appendRow()` method internally calls `beginRow(), `appendValue()` and `endRow()`.
 
 ## Appender Type Support
 The appender writes directly to the underlying storage and thus cannot leverage default column values. `appendRow` asserts that the # of values matches the number of columns. However, when using the explicit `beginRow` + `appendValue` + `endRow`, you must make sure to append a value for each column, else the behavior is undefined. 

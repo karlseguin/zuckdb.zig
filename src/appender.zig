@@ -386,23 +386,7 @@ pub const Appender = struct {
 		switch (vector.data) {
 			.list => |*list| {
 				const size = list.size;
-				const new_size = size + values.len;
-				list.size = new_size;
-
-				list.entries[row_index] = .{
-					.offset = size,
-					.length = values.len,
-				};
-
-				if (c.duckdb_list_vector_set_size(vector.vector, new_size) == DuckDBError) {
-					self.setErr("failed to set vector size", false);
-					return error.DuckDBError;
-				}
-				if (c.duckdb_list_vector_reserve(vector.vector, new_size) == DuckDBError) {
-					self.setErr("failed to reserve vector space", false);
-					return error.DuckDBError;
-				}
-
+				const new_size = try self.setListSize(vector.vector, list, values.len, row_index);
 				switch (list.child) {
 					.i8 => |data| return self.setListDirect(i8, "tinyint[]", list, values, data[size..new_size]),
 					.i16 => |data| return self.setListDirect(i16, "smallint[]", list, values, data[size..new_size]),
@@ -558,14 +542,7 @@ pub const Appender = struct {
 		}
 
 		if (@TypeOf(values) == []const ?T) {
-			const validity = list.child_validity orelse blk: {
-				const child_vector = list.child_vector;
-				c.duckdb_vector_ensure_validity_writable(child_vector);
-				const v = c.duckdb_vector_get_validity(child_vector);
-				list.child_validity = v;
-				break :blk v;
-			};
-
+			const validity = list.childValidity();
 			const validity_start = list.size - values.len;
 
 			for (values, 0..) |value, i| {
@@ -590,14 +567,7 @@ pub const Appender = struct {
 		}
 
 		if (@TypeOf(values) == []const ?T) {
-			const validity = list.child_validity orelse blk: {
-				const child_vector = list.child_vector;
-				c.duckdb_vector_ensure_validity_writable(child_vector);
-				const v = c.duckdb_vector_get_validity(child_vector);
-				list.child_validity = v;
-				break :blk v;
-			};
-
+			const validity = list.childValidity();
 			const validity_start = list.size - values.len;
 
 			for (values, 0..) |value, i| {
@@ -611,6 +581,90 @@ pub const Appender = struct {
 		}
 
 		return self.appendTypeError(column_type, @TypeOf(values));
+	}
+
+	pub fn appendListMap(self: *Appender, comptime T: type, comptime D: type, column: usize, values: []const T, transform: *const fn(T) OptionalType(D)) !void {
+		var vector = &self.vectors[column];
+		switch (vector.data) {
+			.list => |*list| {
+				const size = list.size;
+				const new_size = try self.setListSize(vector.vector, list, values.len, self.row_index);
+				const validity = list.childValidity();
+				const validity_start = list.size - values.len;
+				const child = list.child;
+				switch (D) {
+					i8 => try appendListMapInto(T, i8, child.i8[size..new_size], values, transform, validity, validity_start),
+					i16 => try appendListMapInto(T, i16, child.i16[size..new_size], values, transform, validity, validity_start),
+					i32 => try appendListMapInto(T, i32, child.i32[size..new_size], values, transform, validity, validity_start),
+					i64 => try appendListMapInto(T, i64, child.i64[size..new_size], values, transform, validity, validity_start),
+					i128 => try appendListMapInto(T, i128, child.i128[size..new_size], values, transform, validity, validity_start),
+					u8 => try appendListMapInto(T, u8, child.u8[size..new_size], values, transform, validity, validity_start),
+					u16 => try appendListMapInto(T, u16, child.u16[size..new_size], values, transform, validity, validity_start),
+					u32 => try appendListMapInto(T, u32, child.u32[size..new_size], values, transform, validity, validity_start),
+					u64 => try appendListMapInto(T, u64, child.u64[size..new_size], values, transform, validity, validity_start),
+					u128 => try appendListMapInto(T, u128, child.u128[size..new_size], values, transform, validity, validity_start),
+					bool => try appendListMapInto(T, bool, child.bool[size..new_size], values, transform, validity, validity_start),
+					f32 => try appendListMapInto(T, f32, child.f32[size..new_size], values, transform, validity, validity_start),
+					f64 => try appendListMapInto(T, f64, child.f64[size..new_size], values, transform, validity, validity_start),
+					[]u8, []const u8 => try appendTextListMapInto(T, list.child_vector, size, values, transform, validity),
+		// date: [*]c.duckdb_date,
+		// time: [*]c.duckdb_time,
+		// timestamp: [*]i64,
+		// interval: [*]c.duckdb_interval,
+		// decimal: Vector.Decimal,
+		// uuid: [*c]i128,
+					else => {
+						const err = try std.fmt.allocPrint(self.allocator, "appendListMap does not support {s} lists", .{@typeName(D)});
+						return self.setErr(err, true);
+					}
+				}
+			},
+			else => {
+				const err = try std.fmt.allocPrint(self.allocator, "column {d} is not a list", .{column});
+				return self.setErr(err, true);
+			}
+		}
+	}
+
+	fn appendListMapInto(comptime T: type, comptime D: type, data: []D, values: anytype, transform: *const fn(T) OptionalType(D), validity: [*c]u64, validity_start: usize) !void {
+		for (values, 0..) |value, i| {
+			if (transform(value)) |v| {
+				data[i] = v;
+			} else {
+				c.duckdb_validity_set_row_invalid(validity, validity_start + i);
+			}
+		}
+	}
+
+	fn appendTextListMapInto(comptime T: type, child_vector: c.duckdb_vector, start: usize, values: anytype, transform: *const fn(T) ?[]const u8, validity: [*c]u64) !void {
+		for (values, start..) |value, i| {
+			if (transform(value)) |v| {
+				c.duckdb_vector_assign_string_element_len(child_vector, i, v.ptr, v.len);
+			} else {
+				c.duckdb_validity_set_row_invalid(validity, i);
+			}
+		}
+	}
+
+	fn setListSize(self: *Appender, vector: c.duckdb_vector, list: *Vector.List, value_count: usize, row_index: usize) !usize {
+		const size = list.size;
+		const new_size = size + value_count;
+		list.size = new_size;
+
+		list.entries[row_index] = .{
+			.offset = size,
+			.length = value_count,
+		};
+
+		if (c.duckdb_list_vector_set_size(vector, new_size) == DuckDBError) {
+			self.setErr("failed to set vector size", false);
+			return error.DuckDBError;
+		}
+		if (c.duckdb_list_vector_reserve(vector, new_size) == DuckDBError) {
+			self.setErr("failed to reserve vector space", false);
+			return error.DuckDBError;
+		}
+		return new_size;
 	}
 
 	fn appendTypeError(self: *Appender, comptime data_type: []const u8, value_type: type) error{AppendError} {
@@ -632,6 +686,13 @@ pub const Appender = struct {
 		self.own_err = own;
 	}
 };
+
+fn OptionalType(comptime T: type) type {
+	switch (@typeInfo(T)) {
+		.Optional => return T,
+		else => return ?T,
+	}
+}
 
 fn appendError(comptime T: type) void {
 	@compileError("cannot append value of type " ++ @typeName(T));
@@ -1324,6 +1385,61 @@ test "Appender: list multiple" {
 	try t.expectEqual(10, i);
 }
 
+test "Appender: appendListMap int" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data integer[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.appendListMap([]const u8, i32, 1, &[_][]const u8{"123", "0", "999"}, testAtoi);
+		try appender.endRow();
+		try appender.flush();
+
+
+		var row = (try conn.row("select data from applist where id = 1", .{})).?;
+		defer row.deinit();
+		try assertList(&[_]?i32{123, null, 999}, row.list(?i32, 0).?);
+	}
+}
+
+test "Appender: appendListMap text" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data varchar[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.appendListMap(i64, []const u8, 1, &[_]i64{-3929, 999, 0}, testItoa);
+		try appender.endRow();
+		try appender.flush();
+
+
+		var row = (try conn.row("select data from applist where id = 1", .{})).?;
+		defer row.deinit();
+		const list_texts = row.list(?[]u8, 0).?;
+		try t.expectEqualStrings("-3929", list_texts.get(0).?);
+		try t.expectEqualStrings("999", list_texts.get(1).?);
+		try t.expectEqual(null, list_texts.get(2));
+	}
+}
+
 test "Appender: incomplete row" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
@@ -1362,6 +1478,20 @@ test "Appender: incomplete row" {
 		i += 1;
 	}
 	try t.expectEqual(2, i);
+}
+
+fn testAtoi(str: []const u8) ?i32 {
+	if (std.mem.eql(u8, str, "123")) return 123;  // (•_•)
+	if (std.mem.eql(u8, str, "0")) return null;   // ( •_•)>⌐■-■
+	if (std.mem.eql(u8, str, "999")) return 999;  // (⌐■_■)
+	unreachable;
+}
+
+fn testItoa(value: i64) ?[]const u8 {
+	if (value == 0) return null;         // (•_•)
+	if (value == 999) return "999";      // ( •_•)>⌐■-■
+	if (value == -3929) return "-3929";  // (⌐■_■)
+	unreachable;
 }
 
 fn assertList(expected: anytype, actual: anytype) !void {
