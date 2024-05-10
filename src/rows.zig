@@ -3,6 +3,7 @@ const lib = @import("lib.zig");
 
 const c = lib.c;
 const Row = lib.Row;
+const Conn = lib.Conn;
 const Vector = lib.Vector;
 const DataType = lib.DataType;
 
@@ -10,8 +11,10 @@ const DuckDBError = c.DuckDBError;
 const Allocator = std.mem.Allocator;
 
 pub const Rows = struct {
-	// When not null, the rows owns the stmt and is responsible for freeing it.
-	stmt: ?*c.duckdb_prepared_statement,
+	// Depending on how it's executed, Rows might own a prepared statement and/or
+	// a connection (or neither). By "own", we mean that when rows.deinit() is
+	// called, it must free/release whatever it owns.
+	own: Own,
 
 	// The underlying duckdb result
 	result: *c.duckdb_result,
@@ -39,11 +42,21 @@ pub const Rows = struct {
 
 	arena: *std.heap.ArenaAllocator,
 
-	pub fn init(allocator: Allocator, stmt: ?*c.duckdb_prepared_statement, result: *c.duckdb_result, state: anytype) !Rows {
-		errdefer if (stmt) |s| {
-			c.duckdb_destroy_prepare(s);
-			allocator.destroy(s);
-		};
+	const Own = struct {
+		conn: ?*Conn = null,
+		stmt: ?*c.duckdb_prepared_statement = null,
+	};
+
+	pub fn init(allocator: Allocator, result: *c.duckdb_result, state: anytype, own: Own) !Rows {
+		errdefer {
+			if (own.stmt) |s| {
+				c.duckdb_destroy_prepare(s);
+				allocator.destroy(s);
+			}
+			if (own.conn) |conn| {
+				conn.release();
+			}
+		}
 
 		const r = result.*;
 		const chunk_count = c.duckdb_result_chunk_count(r);
@@ -68,7 +81,7 @@ pub const Rows = struct {
 		}
 
 		return .{
-			.stmt = stmt,
+			.own = own,
 			.arena = arena,
 			.result = result,
 			.vectors = vectors,
@@ -89,9 +102,14 @@ pub const Rows = struct {
 			allocator.destroy(result);
 		}
 
-		if (self.stmt) |stmt| {
+		const own = self.own;
+		if (own.stmt) |stmt| {
 			c.duckdb_destroy_prepare(stmt);
 			allocator.destroy(stmt);
+		}
+
+		if (own.conn) |conn| {
+			conn.release();
 		}
 
 		self.arena.deinit();

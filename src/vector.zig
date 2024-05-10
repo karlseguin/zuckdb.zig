@@ -156,6 +156,8 @@ pub const Vector = struct {
 				switch (self.*) {
 					.simple => |duckdb_type| {
 						if (duckdb_type == c.DUCKDB_TYPE_VARCHAR) {
+							// For example, a JSON column has a "varchar" duckdb_type, but
+							// a "JSON" alias. So the alias seems to always be more specific.
 							const alias = c.duckdb_logical_type_get_alias(logical_type);
 							if (alias != null) {
 								defer c.duckdb_free(alias);

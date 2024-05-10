@@ -3,6 +3,8 @@ const lib = @import("lib.zig");
 
 const DB = lib.DB;
 const Conn = lib.Conn;
+const Rows = lib.Rows;
+const OwningRow = lib.OwningRow;
 
 const Allocator = std.mem.Allocator;
 
@@ -147,13 +149,53 @@ pub const Pool = struct {
 		self.cond.signal();
 	}
 
+	pub fn exec(self: *Pool, sql: anytype, values: anytype) !usize {
+		var conn = try self.acquire();
+		defer self.release(conn);
+		return conn.exec(sql, values);
+	}
+
+	pub fn query(self: *Pool, sql: anytype, values: anytype) !Rows {
+		return self.queryWithState(sql, values, null);
+	}
+
+	pub fn queryWithState(self: *Pool, sql: anytype, values: anytype, state: anytype) !Rows {
+		const conn = try self.acquire();
+		errdefer self.release(conn);
+
+		const result = try conn.getResult(sql, values);
+		return Rows.init(self.allocator, result.result, state, .{
+			.conn = conn,
+			.stmt = result.stmt,
+		});
+	}
+
+	pub fn row(self: *Pool, sql: anytype, values: anytype) !?OwningRow {
+		return self.rowWithState(sql, values, null);
+	}
+
+	pub fn rowWithState(self: *Pool, sql: anytype, values: anytype, state: anytype) !?OwningRow {
+		var rows = try self.queryWithState(sql, values, state);
+		errdefer rows.deinit();
+
+		const r = (try rows.next()) orelse {
+			rows.deinit();
+			return null;
+		};
+
+		return .{
+			.row = r,
+			.rows = rows,
+		};
+	}
+
 	pub fn newConn(self: *Pool) !Conn {
 		return self.db.conn();
 	}
 };
 
 const t = std.testing;
-test "Pool" {
+test "Pool: thread-safety" {
 	const db = try DB.init(t.allocator, "/tmp/duckdb.zig.test", .{});
 	var pool = try db.pool(.{
 		.size = 2,
@@ -172,6 +214,37 @@ test "Pool" {
 
 	const count = try c1.exec("delete from pool_test", .{});
 	try t.expectEqual(6000, count);
+}
+
+test "Pool: exec/query/row" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	var pool = try db.pool(.{.size = 1});
+	defer pool.deinit();
+
+	_ = try pool.exec("create table pool_test (id integer)", .{});
+	try t.expectEqual(3, try pool.exec("insert into pool_test (id) values ($1), ($2), ($3)", .{1, 20, 300}));
+
+	{
+		var rows = try pool.query("select * from pool_test where id != $1 order by id", .{20});
+		defer rows.deinit();
+
+		try t.expectEqual(1, (try rows.next()).?.get(i32, 0));
+		try t.expectEqual(300, (try rows.next()).?.get(i32, 0));
+		try t.expectEqual(null, rows.next());
+	}
+
+	{
+		var row = (try pool.row("select * from pool_test where id = $1", .{300})) orelse unreachable;
+		defer row.deinit();
+		try t.expectEqual(300, row.get(i32, 0));
+	}
+
+	{
+		const row = try pool.row("select * from pool_test where id = $1", .{400});
+		try t.expectEqual(null, row);
+	}
+
+	try t.expectEqual(3, try pool.exec("delete from pool_test", .{}));
 }
 
 fn testPool(p: *Pool) void {

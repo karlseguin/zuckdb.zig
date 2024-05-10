@@ -133,7 +133,9 @@ pub const Stmt = struct {
 
 	pub fn query(self: *const Stmt, state: anytype) !Rows {
 		const result = try self.getResult();
-		return Rows.init(self.conn.allocator, if (self.auto_release) self.stmt else null, result, state);
+		return Rows.init(self.conn.allocator, result, state, .{
+			.stmt = if (self.auto_release) self.stmt else null,
+		});
 	}
 
 	pub fn getResult(self: *const Stmt) !*c.duckdb_result {

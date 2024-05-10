@@ -107,7 +107,7 @@ pub const Conn = struct {
 
 	pub fn queryWithState(self: *Conn, sql: anytype, values: anytype, state: anytype) !Rows {
 		const result = try self.getResult(sql, values);
-		return Rows.init(self.allocator, result.stmt, result.result, state);
+		return Rows.init(self.allocator, result.result, state, .{.stmt = result.stmt});
 	}
 
 	pub fn queryCacheWithState(self: *Conn, name: []const u8, version: u32, sql: anytype, values: anytype, state: anytype) !Rows {
@@ -202,7 +202,7 @@ pub const Conn = struct {
 		result: *c.duckdb_result,
 	};
 
-	fn getResult(self: *Conn, sql: anytype, values: anytype) !Result {
+	pub fn getResult(self: *Conn, sql: anytype, values: anytype) !Result {
 		if (values.len > 0) {
 			var stmt = try self.prepare(sql, .{.auto_release = true});
 			errdefer stmt.deinit();
