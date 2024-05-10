@@ -14,6 +14,8 @@ pub const Vector = struct {
 	data: Data,
 	validity: ?[*c]u64,
 	vector: c.duckdb_vector,
+	logical_type: c.duckdb_logical_type,
+
 
 	pub fn init(allocator: Allocator, logical_type: c.duckdb_logical_type) !Vector {
 		return .{
@@ -21,21 +23,26 @@ pub const Vector = struct {
 			.data = undefined,
 			.vector = undefined,
 			.validity = undefined,
+			.logical_type = logical_type,
 			.type = try Vector.Type.init(allocator, logical_type),
 		};
 	}
 
 	pub fn deinit(self: *Vector) void {
-		self.type.deinit();
+		c.duckdb_destroy_logical_type(&self.logical_type);
+		switch (self.type) {
+			.scalar => {},
+			.list => |*list| list.deinit(),
+		}
 	}
 
 	pub fn writeType(self: *const Vector, writer: anytype) !void {
 		switch (self.type) {
 			.list => |list| {
-				try list.writeType(writer);
+				try list.child.writeType(writer, self.logical_type);
 				return writer.writeAll("[]");
 			},
-			.scalar => |s| return s.writeType(writer),
+			.scalar => |s| return s.writeType(writer, self.logical_type),
 		}
 	}
 
@@ -48,7 +55,7 @@ pub const Vector = struct {
 	}
 
 	pub const Type = union(enum) {
-		list: Vector.Type.Scalar,
+		list: Vector.Type.List,
 		scalar: Vector.Type.Scalar,
 
 		// We expect allocator to be an Arena. Currently, we only need allocator for
@@ -58,9 +65,9 @@ pub const Vector = struct {
 			switch (type_id) {
 				c.DUCKDB_TYPE_LIST => {
 					const child_type = c.duckdb_list_type_child_type(logical_type);
-					return .{.list = try initScalar(allocator, child_type) };
+					return .{.list = try Vector.Type.List.init(allocator, child_type)};
 				},
-				else => return .{.scalar = try initScalar(allocator, logical_type)},
+				else => return .{.scalar = try Vector.Type.Scalar.init(allocator, type_id, logical_type)},
 			}
 		}
 
@@ -71,75 +78,92 @@ pub const Vector = struct {
 			}
 		}
 
-		fn initScalar(allocator: Allocator, logical_type: c.duckdb_logical_type) !Vector.Type.Scalar {
-			const type_id = c.duckdb_get_type_id(logical_type);
-			switch (type_id) {
-				c.DUCKDB_TYPE_ENUM => {
-					const internal_type: Vector.Type.Enum.Type = switch (c.duckdb_enum_internal_type(logical_type)) {
-						c.DUCKDB_TYPE_UTINYINT => .u8,
-						c.DUCKDB_TYPE_USMALLINT => .u16,
-						c.DUCKDB_TYPE_UINTEGER => .u32,
-						c.DUCKDB_TYPE_UBIGINT => .u64,
-						else => unreachable,
-					};
-					return .{.@"enum" = .{
-						.type = internal_type,
-						.logical_type = logical_type,
-						.cache = std.AutoHashMap(u64, []const u8).init(allocator),
-					}};
-				},
-				c.DUCKDB_TYPE_DECIMAL => {
-					const scale = c.duckdb_decimal_scale(logical_type);
-					const width = c.duckdb_decimal_width(logical_type);
-					const internal_type: Vector.Type.Decimal.Type = switch (c.duckdb_decimal_internal_type(logical_type)) {
-						c.DUCKDB_TYPE_SMALLINT => .i16,
-						c.DUCKDB_TYPE_INTEGER => .i32,
-						c.DUCKDB_TYPE_BIGINT => .i64,
-						c.DUCKDB_TYPE_HUGEINT => .i128,
-						else => unreachable,
-					};
-					return .{.decimal = .{.width = width, .scale = scale, .type = internal_type}};
-				},
-				c.DUCKDB_TYPE_BLOB,
-				c.DUCKDB_TYPE_VARCHAR,
-				c.DUCKDB_TYPE_BIT,
-				c.DUCKDB_TYPE_TINYINT,
-				c.DUCKDB_TYPE_SMALLINT,
-				c.DUCKDB_TYPE_INTEGER,
-				c.DUCKDB_TYPE_BIGINT,
-				c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID,
-				c.DUCKDB_TYPE_UHUGEINT,
-				c.DUCKDB_TYPE_UTINYINT,
-				c.DUCKDB_TYPE_USMALLINT,
-				c.DUCKDB_TYPE_UINTEGER,
-				c.DUCKDB_TYPE_UBIGINT,
-				c.DUCKDB_TYPE_BOOLEAN,
-				c.DUCKDB_TYPE_FLOAT,
-				c.DUCKDB_TYPE_DOUBLE,
-				c.DUCKDB_TYPE_DATE,
-				c.DUCKDB_TYPE_TIME,
-				c.DUCKDB_TYPE_TIMESTAMP,
-				c.DUCKDB_TYPE_TIMESTAMP_TZ,
-				c.DUCKDB_TYPE_INTERVAL => return .{ .simple = type_id },
-				else => return error.UnknownDataType,
+		pub const List = struct {
+			child: Vector.Type.Scalar,
+			child_logical_type: c.duckdb_logical_type,
+
+			fn init(allocator: Allocator, child_logical_type: c.duckdb_logical_type) !Vector.Type.List {
+				return .{
+					.child_logical_type = child_logical_type,
+					.child = try Vector.Type.Scalar.init(allocator, c.duckdb_get_type_id(child_logical_type), child_logical_type),
+				};
 			}
-		}
+
+			fn deinit(self: *@This()) void {
+				c.duckdb_destroy_logical_type(&self.child_logical_type);
+			}
+		};
 
 		pub const Scalar = union(enum) {
 			simple: c.duckdb_type,
 			@"enum": Vector.Type.Enum,
 			decimal: Vector.Type.Decimal,
 
-			fn deinit(self: *@This()) void {
-				switch (self.*) {
-					.simple, .decimal => {},
-					.@"enum" => |*e| c.duckdb_destroy_logical_type(&e.logical_type),
+			fn init(allocator: Allocator, type_id: c.duckdb_type, logical_type: c.duckdb_logical_type) !Vector.Type.Scalar {
+				switch (type_id) {
+					c.DUCKDB_TYPE_ENUM => {
+						const internal_type: Vector.Type.Enum.Type = switch (c.duckdb_enum_internal_type(logical_type)) {
+							c.DUCKDB_TYPE_UTINYINT => .u8,
+							c.DUCKDB_TYPE_USMALLINT => .u16,
+							c.DUCKDB_TYPE_UINTEGER => .u32,
+							c.DUCKDB_TYPE_UBIGINT => .u64,
+							else => unreachable,
+						};
+						return .{.@"enum" = .{
+							.type = internal_type,
+							.logical_type = logical_type,
+							.cache = std.AutoHashMap(u64, []const u8).init(allocator),
+						}};
+					},
+					c.DUCKDB_TYPE_DECIMAL => {
+						const scale = c.duckdb_decimal_scale(logical_type);
+						const width = c.duckdb_decimal_width(logical_type);
+						const internal_type: Vector.Type.Decimal.Type = switch (c.duckdb_decimal_internal_type(logical_type)) {
+							c.DUCKDB_TYPE_SMALLINT => .i16,
+							c.DUCKDB_TYPE_INTEGER => .i32,
+							c.DUCKDB_TYPE_BIGINT => .i64,
+							c.DUCKDB_TYPE_HUGEINT => .i128,
+							else => unreachable,
+						};
+						return .{.decimal = .{.width = width, .scale = scale, .type = internal_type}};
+					},
+					c.DUCKDB_TYPE_BLOB,
+					c.DUCKDB_TYPE_VARCHAR,
+					c.DUCKDB_TYPE_BIT,
+					c.DUCKDB_TYPE_TINYINT,
+					c.DUCKDB_TYPE_SMALLINT,
+					c.DUCKDB_TYPE_INTEGER,
+					c.DUCKDB_TYPE_BIGINT,
+					c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID,
+					c.DUCKDB_TYPE_UHUGEINT,
+					c.DUCKDB_TYPE_UTINYINT,
+					c.DUCKDB_TYPE_USMALLINT,
+					c.DUCKDB_TYPE_UINTEGER,
+					c.DUCKDB_TYPE_UBIGINT,
+					c.DUCKDB_TYPE_BOOLEAN,
+					c.DUCKDB_TYPE_FLOAT,
+					c.DUCKDB_TYPE_DOUBLE,
+					c.DUCKDB_TYPE_DATE,
+					c.DUCKDB_TYPE_TIME,
+					c.DUCKDB_TYPE_TIMESTAMP,
+					c.DUCKDB_TYPE_TIMESTAMP_TZ,
+					c.DUCKDB_TYPE_INTERVAL => return .{ .simple = type_id },
+					else => return error.UnknownDataType,
 				}
 			}
 
-			pub fn writeType(self: *const Vector.Type.Scalar, writer: anytype) !void {
+			pub fn writeType(self: *const Vector.Type.Scalar, writer: anytype, logical_type: c.duckdb_logical_type) !void {
 				switch (self.*) {
-					.simple => |duckdb_type| return writer.writeAll(@tagName(lib.DataType.fromDuckDBType(duckdb_type))),
+					.simple => |duckdb_type| {
+						if (duckdb_type == c.DUCKDB_TYPE_VARCHAR) {
+							const alias = c.duckdb_logical_type_get_alias(logical_type);
+							if (alias != null) {
+								defer c.duckdb_free(alias);
+								return writer.writeAll(std.mem.span(alias));
+							}
+						}
+						return writer.writeAll(@tagName(lib.DataType.fromDuckDBType(duckdb_type)));
+					},
 					.@"enum" => return writer.writeAll("enum"),
 					.decimal => |d| return std.fmt.format(writer, "decimal({d},{d})", .{d.width, d.scale}),
 				}
@@ -158,6 +182,7 @@ pub const Vector = struct {
 
 		const Enum = struct {
 			type: Vector.Type.Enum.Type,
+			// will be freed when the vector is freed
 			logical_type: c.duckdb_logical_type,
 			cache: std.AutoHashMap(u64, []const u8),
 
@@ -196,7 +221,6 @@ pub const Vector = struct {
 		uuid: [*c]i128,
 		@"enum": Vector.Enum,
 	};
-
 
 	pub const Decimal = struct {
 		width: u8,
@@ -307,11 +331,11 @@ fn scalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Ve
 	}
 }
 
-fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vector.List {
+fn listData(list: *Vector.Type.List, real_vector: c.duckdb_vector) Vector.List {
 	const raw_data = c.duckdb_vector_get_data(real_vector);
 
 	const child_vector = c.duckdb_list_vector_get_child(real_vector);
-	const child_data = scalarData(child_type, child_vector);
+	const child_data = scalarData(&list.child, child_vector);
 	const child_validity = c.duckdb_vector_get_validity(child_vector);
 
 	return .{
@@ -319,7 +343,7 @@ fn listData(child_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Vecto
 		.validity = child_validity,
 		.entries = @ptrCast(@alignCast(raw_data)),
 		.child_vector = child_vector,
-		.type = switch (child_type.*) {
+		.type = switch (list.child) {
 			.@"enum" => c.DUCKDB_TYPE_ENUM,
 			.decimal => c.DUCKDB_TYPE_DECIMAL,
 			.simple => |s| s,
@@ -361,6 +385,7 @@ test "Vector: write type" {
 		\\   col_decimal decimal(18, 6),
 		\\   col_tinyint_arr tinyint[],
 		\\   col_decimal_arr decimal(5, 4)[],
+		\\   col_json json,
 		\\ )
 	, .{});
 
@@ -393,6 +418,7 @@ test "Vector: write type" {
 	try expectTypeName(&arr, rows.vectors[20], "decimal(18,6)");
 	try expectTypeName(&arr, rows.vectors[21], "tinyint[]");
 	try expectTypeName(&arr, rows.vectors[22], "decimal(5,4)[]");
+	try expectTypeName(&arr, rows.vectors[23], "JSON");
 }
 
 fn expectTypeName(arr: *std.ArrayList(u8), vector: Vector, expected: []const u8) !void {
