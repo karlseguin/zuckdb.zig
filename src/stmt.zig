@@ -732,4 +732,18 @@ test "Stmt: statementType" {
 		defer stmt.deinit();
 		try t.expectEqual(.drop, stmt.statementType());
 	}
+
+	{
+		const stmt = try conn.prepare("describe", .{});
+		defer stmt.deinit();
+		_ = try stmt.exec();
+		try t.expectEqual(.select, stmt.statementType());
+	}
+
+	{
+		const stmt = try conn.prepare("explain select 1", .{});
+		defer stmt.deinit();
+		_ = try stmt.exec();
+		try t.expectEqual(.explain, stmt.statementType());
+	}
 }

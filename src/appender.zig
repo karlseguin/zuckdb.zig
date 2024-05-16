@@ -4,6 +4,7 @@ const lib = @import("lib.zig");
 const c = lib.c;
 const Date = lib.Date;
 const Time = lib.Time;
+const UUID = lib.UUID;
 const Interval = lib.Interval;
 const Vector = lib.Vector;
 const DuckDBError = c.DuckDBError;
@@ -596,7 +597,11 @@ pub const Appender = struct {
 					i8 => try appendListMapInto(T, i8, child.i8[size..new_size], values, transform, validity, validity_start),
 					i16 => try appendListMapInto(T, i16, child.i16[size..new_size], values, transform, validity, validity_start),
 					i32 => try appendListMapInto(T, i32, child.i32[size..new_size], values, transform, validity, validity_start),
-					i64 => try appendListMapInto(T, i64, child.i64[size..new_size], values, transform, validity, validity_start),
+					i64 => switch (child) {
+						.i64 => |cc| try appendListMapInto(T, i64, cc[size..new_size], values, transform, validity, validity_start),
+						.timestamp => |cc| try appendListMapInto(T, i64, cc[size..new_size], values, transform, validity, validity_start),
+						else => unreachable,
+					},
 					i128 => try appendListMapInto(T, i128, child.i128[size..new_size], values, transform, validity, validity_start),
 					u8 => try appendListMapInto(T, u8, child.u8[size..new_size], values, transform, validity, validity_start),
 					u16 => try appendListMapInto(T, u16, child.u16[size..new_size], values, transform, validity, validity_start),
@@ -606,13 +611,15 @@ pub const Appender = struct {
 					bool => try appendListMapInto(T, bool, child.bool[size..new_size], values, transform, validity, validity_start),
 					f32 => try appendListMapInto(T, f32, child.f32[size..new_size], values, transform, validity, validity_start),
 					f64 => try appendListMapInto(T, f64, child.f64[size..new_size], values, transform, validity, validity_start),
-					[]u8, []const u8 => try appendTextListMapInto(T, list.child_vector, size, values, transform, validity),
-		// date: [*]c.duckdb_date,
-		// time: [*]c.duckdb_time,
-		// timestamp: [*]i64,
-		// interval: [*]c.duckdb_interval,
-		// decimal: Vector.Decimal,
-		// uuid: [*c]i128,
+					[]u8, []const u8 => switch(child) {
+						.uuid => |cc| try appendUUIDListMapInto(T, cc[size..new_size], values, transform, validity, validity_start),
+						.blob, .varchar => try appendTextListMapInto(T, list.child_vector, size, values, transform, validity),
+						else => unreachable,
+					},
+					Date => try appendDateListMapInto(T, child.date[size..new_size], values, transform, validity, validity_start),
+					Time => try appendTimeListMapInto(T, child.time[size..new_size], values, transform, validity, validity_start),
+					// interval: [*]c.duckdb_interval,
+					// decimal: Vector.Decimal,
 					else => {
 						const err = try std.fmt.allocPrint(self.allocator, "appendListMap does not support {s} lists", .{@typeName(D)});
 						return self.setErr(err, true);
@@ -642,6 +649,36 @@ pub const Appender = struct {
 				c.duckdb_vector_assign_string_element_len(child_vector, i, v.ptr, v.len);
 			} else {
 				c.duckdb_validity_set_row_invalid(validity, i);
+			}
+		}
+	}
+
+	fn appendDateListMapInto(comptime T: type, data: []c.duckdb_date, values: anytype, transform: *const fn(T) ?Date, validity: [*c]u64, validity_start: usize) !void {
+		for (values, 0..) |value, i| {
+			if (transform(value)) |v| {
+				data[i] = c.duckdb_to_date(v);
+			} else {
+				c.duckdb_validity_set_row_invalid(validity, validity_start + i);
+			}
+		}
+	}
+
+	fn appendTimeListMapInto(comptime T: type, data: []c.duckdb_time, values: anytype, transform: *const fn(T) ?Time, validity: [*c]u64, validity_start: usize) !void {
+		for (values, 0..) |value, i| {
+			if (transform(value)) |v| {
+				data[i] = c.duckdb_to_time(v);
+			} else {
+				c.duckdb_validity_set_row_invalid(validity, validity_start + i);
+			}
+		}
+	}
+
+	fn appendUUIDListMapInto(comptime T: type, data: []i128, values: anytype, transform: *const fn(T) ?[]const u8, validity: [*c]u64, validity_start: usize) !void {
+		for (values, 0..) |value, i| {
+			if (transform(value)) |v| {
+				data[i] = try encodeUUID(v);
+			} else {
+				c.duckdb_validity_set_row_invalid(validity, validity_start + i);
 			}
 		}
 	}
@@ -1440,6 +1477,117 @@ test "Appender: appendListMap text" {
 	}
 }
 
+test "Appender: appendListMap date" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data date[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.appendListMap(u8, Date, 1, &[_]u8{1, 0, 2}, testMapDate);
+		try appender.endRow();
+		try appender.flush();
+
+		var row = (try conn.row("select data from applist where id = 1", .{})).?;
+		defer row.deinit();
+		try assertList(&[_]?Date{
+			.{.year = 2005, .month = 8, .day = 10},
+			null,
+			.{.year = -8, .month = 1, .day = 30}
+		}, row.list(?Date, 0).?);
+	}
+}
+
+test "Appender: appendListMap time" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data time[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.appendListMap(u8, Time, 1, &[_]u8{1, 0, 2}, testMapTime);
+		try appender.endRow();
+		try appender.flush();
+
+		var row = (try conn.row("select data from applist where id = 1", .{})).?;
+		defer row.deinit();
+		try assertList(&[_]?Time{
+			.{.hour = 10, .min = 56, .sec = 21, .micros = 123456},
+			null,
+			.{.hour = 22, .min = 8, .sec = 1, .micros = 0},
+		}, row.list(?Time, 0).?);
+	}
+}
+
+test "Appender: appendListMap timestamp" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data timestamptz[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(1, 0);
+		try appender.appendListMap(u8, i64, 1, &[_]u8{1, 0, 2}, testMapTimeStamp);
+		try appender.endRow();
+		try appender.flush();
+
+		var row = (try conn.row("select data from applist where id = 1", .{})).?;
+		defer row.deinit();
+		try assertList(&[_]?i64{1715854289547193, null, -2775838248400000}, row.list(?i64, 0).?);
+	}
+}
+
+test "Appender: appendListMap UUID" {
+	const db = try DB.init(t.allocator, ":memory:", .{});
+	defer db.deinit();
+
+	var conn = try db.conn();
+	defer conn.deinit();
+
+	_ = try conn.exec("create table applist (id integer, data uuid[])", .{});
+
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(392, 0);
+		try appender.appendListMap(u8, []const u8, 1, &[_]u8{2, 1, 0}, testMapUUID);
+		try appender.endRow();
+		try appender.flush();
+
+		var row = (try conn.row("select data from applist where id = 392", .{})).?;
+		defer row.deinit();
+		const list = row.list(?UUID, 0).?;
+		try t.expectEqualStrings("e188523a-9650-41ef-8cb3-d7e3cd4833b9", &(list.get(0).?));
+		try t.expectEqualStrings("61cdea17-71fd-44f2-898d-6756d6b63a97", &(list.get(1).?));
+		try t.expectEqual(null, list.get(2));
+	}
+}
+
 test "Appender: incomplete row" {
 	const db = try DB.init(t.allocator, ":memory:", .{});
 	defer db.deinit();
@@ -1491,6 +1639,34 @@ fn testItoa(value: i64) ?[]const u8 {
 	if (value == 0) return null;         // (•_•)
 	if (value == 999) return "999";      // ( •_•)>⌐■-■
 	if (value == -3929) return "-3929";  // (⌐■_■)
+	unreachable;
+}
+
+fn testMapDate(value: u8) ?Date {
+	if (value == 0) return null;
+	if (value == 1) return Date{.year = 2005, .month = 8, .day = 10};
+	if (value == 2) return Date{.year = -8, .month = 1, .day = 30};
+	unreachable;
+}
+
+fn testMapTime(value: u8) ?Time {
+	if (value == 0) return null;
+	if (value == 1) return Time{.hour = 10, .min = 56, .sec = 21, .micros = 123456};
+	if (value == 2) return Time{.hour = 22, .min = 8, .sec = 1, .micros = 0};
+	unreachable;
+}
+
+fn testMapTimeStamp(value: u8) ?i64 {
+	if (value == 0) return null;
+	if (value == 1) return 1715854289547193;
+	if (value == 2) return -2775838248400000;
+	unreachable;
+}
+
+fn testMapUUID(value: u8) ?[]const u8 {
+	if (value == 0) return null;
+	if (value == 1) return "61cdea17-71fd-44f2-898d-6756d6b63a97";
+	if (value == 2) return "e188523a-9650-41ef-8cb3-d7e3cd4833b9";
 	unreachable;
 }
 
