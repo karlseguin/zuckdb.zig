@@ -63,6 +63,11 @@ pub fn isDuplicate(err: []const u8) bool {
 	return std.mem.startsWith(u8, err, "Constraint Error: Duplicate key");
 }
 
+// Only meant to be used in advanced cases, largely with the appender, but
+// even then, in normal cases, the appender will handle this for you.
+pub const encodeUUID = lib.encodeUUID;
+
+
 test {
 	std.testing.refAllDecls(@This());
 }

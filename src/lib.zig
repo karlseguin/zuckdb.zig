@@ -103,6 +103,41 @@ pub fn uhugeInt(value: u128) c.duckdb_uhugeint {
 	};
 }
 
+// This is here because we expose it via the public API, though it's only useful
+// in advanced cases (when writing directly to a vector, or via the appendListMap)
+pub fn encodeUUID(value: []const u8) !i128 {
+	if (value.len != 36) {
+		return error.InvalidUUID;
+	}
+
+	if (value[8] != '-' or value[13] != '-' or value[18] != '-' or value[23] != '-') {
+		return error.InvalidUUID;
+	}
+
+	var bin: [16]u8 = undefined;
+	inline for (encoded_pos, 0..) |i, j| {
+		const hi = hex_to_nibble[value[i + 0]];
+		const lo = hex_to_nibble[value[i + 1]];
+		if (hi == 0xff or lo == 0xff) {
+			return error.InvalidUUID;
+		}
+		bin[j] = hi << 4 | lo;
+	}
+	const n = std.mem.readInt(i128, &bin, .big);
+	return n ^ (@as(i128, 1) << 127);
+}
+
+const encoded_pos = [16]u8{ 0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34 };
+const hex_to_nibble = [_]u8{0xff} ** 48 ++ [_]u8{
+	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+	0x08, 0x09, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
+} ++ [_]u8{0xff} ** 152;
+
 pub const StringZ = struct {
 	z: [:0]const u8,
 	duped: bool,

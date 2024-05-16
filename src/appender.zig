@@ -602,7 +602,11 @@ pub const Appender = struct {
 						.timestamp => |cc| try appendListMapInto(T, i64, cc[size..new_size], values, transform, validity, validity_start),
 						else => unreachable,
 					},
-					i128 => try appendListMapInto(T, i128, child.i128[size..new_size], values, transform, validity, validity_start),
+					i128 => switch (child) {
+						.uuid => |cc| try appendListMapInto(T, i128, cc[size..new_size], values, transform, validity, validity_start),
+						.i128 => |cc| try appendListMapInto(T, i128, cc[size..new_size], values, transform, validity, validity_start),
+						else => unreachable,
+					},
 					u8 => try appendListMapInto(T, u8, child.u8[size..new_size], values, transform, validity, validity_start),
 					u16 => try appendListMapInto(T, u16, child.u16[size..new_size], values, transform, validity, validity_start),
 					u32 => try appendListMapInto(T, u32, child.u32[size..new_size], values, transform, validity, validity_start),
@@ -735,42 +739,13 @@ fn appendError(comptime T: type) void {
 	@compileError("cannot append value of type " ++ @typeName(T));
 }
 
-fn encodeUUID(value: []const u8) !i128 {
-	var n: i128 = 0;
+pub fn encodeUUID(value: []const u8) !i128 {
 	if (value.len == 16) {
-		n = std.mem.readInt(i128, value[0..16], .big);
-	} else if (value.len == 36) {
-		var bin: [16]u8 = undefined;
-		if (value[8] != '-' or value[13] != '-' or value[18] != '-' or value[23] != '-') {
-			return error.InvalidUUID;
-		}
-
-		inline for (encoded_pos, 0..) |i, j| {
-			const hi = hex_to_nibble[value[i + 0]];
-			const lo = hex_to_nibble[value[i + 1]];
-			if (hi == 0xff or lo == 0xff) {
-				return error.InvalidUUID;
-			}
-			bin[j] = hi << 4 | lo;
-		}
-		n = std.mem.readInt(i128, &bin, .big);
-	} else {
-		return error.InvalidUUID;
+		const n = std.mem.readInt(i128, value[0..16], .big);
+		return n ^ (@as(i128, 1) << 127);
 	}
-
-	return n ^ (@as(i128, 1) << 127);
+	return lib.encodeUUID(value);
 }
-
-const encoded_pos = [16]u8{ 0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34 };
-const hex_to_nibble = [_]u8{0xff} ** 48 ++ [_]u8{
-	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-	0x08, 0x09, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-	0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
-	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-	0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
-} ++ [_]u8{0xff} ** 152;
 
 const t = std.testing;
 const DB = lib.DB;
@@ -1586,6 +1561,25 @@ test "Appender: appendListMap UUID" {
 		try t.expectEqualStrings("61cdea17-71fd-44f2-898d-6756d6b63a97", &(list.get(1).?));
 		try t.expectEqual(null, list.get(2));
 	}
+
+	// as i128s
+	{
+		var appender = try conn.appender(null, "applist");
+		defer appender.deinit();
+
+		appender.beginRow();
+		try appender.appendValue(991, 0);
+		try appender.appendListMap(u8, i128, 1, &[_]u8{0, 1, 2}, testMapUUID2);
+		try appender.endRow();
+		try appender.flush();
+
+		var row = (try conn.row("select data from applist where id = 991", .{})).?;
+		defer row.deinit();
+		const list = row.list(?UUID, 0).?;
+		try t.expectEqual(null, list.get(0));
+		try t.expectEqualStrings("db052c3d-eb85-4259-b59c-532d47f185a1", &(list.get(1).?));
+		try t.expectEqualStrings("c88b0ec1-fa66-40fc-8eb6-09867e9f48e2", &(list.get(2).?));
+	}
 }
 
 test "Appender: incomplete row" {
@@ -1667,6 +1661,13 @@ fn testMapUUID(value: u8) ?[]const u8 {
 	if (value == 0) return null;
 	if (value == 1) return "61cdea17-71fd-44f2-898d-6756d6b63a97";
 	if (value == 2) return "e188523a-9650-41ef-8cb3-d7e3cd4833b9";
+	unreachable;
+}
+
+fn testMapUUID2(value: u8) ?i128 {
+	if (value == 0) return null;
+	if (value == 1) return 120986606432550570389071696710866142625;
+	if (value == 2) return 96426444282114970045097725006964541666;
 	unreachable;
 }
 
