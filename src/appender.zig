@@ -364,6 +364,18 @@ pub const Appender = struct {
 					};
 					c.duckdb_vector_assign_string_element_len(vector.vector, row_index, v.ptr, v.len);
 				},
+				.uuid => |data| {
+					switch (type_info) {
+						.Int => |int| {
+							if (int.signedness == .signed and int.bits == 128) {
+								data[row_index] = value;
+								return;
+							}
+						},
+						else => {}
+					}
+					return self.appendTypeError("uuid", T);
+				},
 				else => {
 					const err = try std.fmt.allocPrint(self.allocator, "cannot bind a {any} (type {s}) to a column of type {s}", .{value, @typeName(T), @tagName(std.meta.activeTag(scalar))});
 					self.setErr(err, true);
@@ -864,6 +876,7 @@ test "Appender: basic variants" {
 	defer appender.deinit();
 	try appender.appendRow(.{1, false, &[_]u8{0xf9,0x3b,0x64,0xe0,0x91,0x62,0x40,0xf5,0xaa,0xb8,0xa0,0x1f,0x5c,0xe9,0x90,0x32}});
 	try appender.appendRow(.{2, null, null});
+	try appender.appendRow(.{3, null, @as(i128, 96426444282114970045097725006964541666)});
 	try appender.flush();
 
 	try t.expectEqual(null, appender.err);
@@ -880,6 +893,12 @@ test "Appender: basic variants" {
 		defer row.deinit();
 		try t.expectEqual(null, row.get(?bool, 1));
 		try t.expectEqual(null, row.get(?lib.UUID, 2));
+	}
+
+	{
+		var row = (try conn.row("select col_uuid from x where id = 3", .{})).?;
+		defer row.deinit();
+		try t.expectEqualStrings("c88b0ec1-fa66-40fc-8eb6-09867e9f48e2", &row.get(lib.UUID, 0));
 	}
 }
 
