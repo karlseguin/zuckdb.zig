@@ -250,7 +250,7 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 
 fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_uint {
 	switch (c.duckdb_param_type(stmt, bind_index)) {
-		c.DUCKDB_TYPE_TIMESTAMP => return c.duckdb_bind_timestamp(stmt, bind_index, .{.micros = value}),
+		c.DUCKDB_TYPE_TIMESTAMP, c.DUCKDB_TYPE_TIMESTAMP_TZ => return c.duckdb_bind_timestamp(stmt, bind_index, .{.micros = value}),
 		else => return c.duckdb_bind_int64(stmt, bind_index, value),
 	}
 }
