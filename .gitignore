@@ -1,4 +1,4 @@
 .DS_Store
 zig-out/
-zig-cache/
+.zig-cache/
 lib/libduckdb.dylib

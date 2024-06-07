@@ -16,7 +16,6 @@ pub const Vector = struct {
 	vector: c.duckdb_vector,
 	logical_type: c.duckdb_logical_type,
 
-
 	pub fn init(allocator: Allocator, logical_type: c.duckdb_logical_type) !Vector {
 		return .{
 			// these are loaded as data chunks are loaded (when reading) or created (when appending)
@@ -388,6 +387,7 @@ test "Vector: write type" {
 		\\   col_tinyint_arr tinyint[],
 		\\   col_decimal_arr decimal(5, 4)[],
 		\\   col_json json,
+		\\   col_timetamptz timestamptz,
 		\\ )
 	, .{});
 
@@ -421,6 +421,7 @@ test "Vector: write type" {
 	try expectTypeName(&arr, rows.vectors[21], "tinyint[]");
 	try expectTypeName(&arr, rows.vectors[22], "decimal(5,4)[]");
 	try expectTypeName(&arr, rows.vectors[23], "JSON");
+	try expectTypeName(&arr, rows.vectors[24], "timestamptz");
 }
 
 fn expectTypeName(arr: *std.ArrayList(u8), vector: Vector, expected: []const u8) !void {
