@@ -1068,7 +1068,7 @@ test "Appender: hugeint" {
 	{
 		var seed: u64 = undefined;
 		std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
-		var prng = std.rand.DefaultPrng.init(seed);
+		var prng = std.Random.DefaultPrng.init(seed);
 
 		const random = prng.random();
 
@@ -1143,7 +1143,7 @@ test "Appender: decimal fuzz" {
 	{
 		var seed: u64 = undefined;
 		std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
-		var prng = std.rand.DefaultPrng.init(seed);
+		var prng = std.Random.DefaultPrng.init(seed);
 		const random = prng.random();
 
 		var appender = try conn.appender(null, "appdec");
