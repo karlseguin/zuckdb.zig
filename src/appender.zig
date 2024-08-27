@@ -190,7 +190,13 @@ pub const Appender = struct {
                 c.duckdb_validity_set_row_invalid(validity, row_index);
                 return;
             },
-            .Optional => return self.appendValue(if (value) |v| v else null, column),
+            .Optional => {
+                if (value) |v| {
+                    return self.appendValue(v, column);
+                } else {
+                    return self.appendValue(null, column);
+                }
+            },
             .Pointer => |ptr| {
                 switch (ptr.size) {
                     .Slice => return self.appendSlice(vector, @as([]const ptr.child, value), row_index),
@@ -1178,6 +1184,44 @@ test "Appender: decimal fuzz" {
         i += 1;
     }
     try t.expectEqual(COUNT, i);
+}
+
+test "Appender: optional values" {
+    const db = try DB.init(t.allocator, ":memory:", .{});
+    defer db.deinit();
+
+    var conn = try db.conn();
+    defer conn.deinit();
+
+    errdefer std.log.err("conn: {?s}", .{conn.err});
+
+    _ = try conn.exec("create table optionals (id integer, non_null_data integer, null_data integer)", .{});
+
+    {
+        var appender = try conn.appender(null, "optionals");
+        defer appender.deinit();
+
+        var i: i32 = 0;
+        while (i < 10) : (i += 1) {
+            const non_null_data: ?i32 = i;
+            const null_data: ?i32 = null;
+
+            try appender.appendRow(.{ i, non_null_data, null_data});
+        }
+        try appender.flush();
+    }
+
+    var rows = try conn.query("select id, non_null_data, null_data from optionals order by id", .{});
+    defer rows.deinit();
+
+    var i: i32 = 0;
+    while (try rows.next()) |row| {
+        try t.expectEqual(i, row.get(?i32, 0));
+        try t.expectEqual(i, row.get(?i32, 1));
+        try t.expectEqual(null, row.get(?i32, 2));
+        i += 1;
+    }
+    try t.expectEqual(10, i);
 }
 
 test "Appender: json" {
