@@ -168,10 +168,10 @@ pub const Stmt = struct {
 fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype, bind_index: usize) !c_uint {
     var rc: c_uint = 0;
     switch (@typeInfo(T)) {
-        .Null => rc = c.duckdb_bind_null(stmt, bind_index),
-        .ComptimeInt => rc = bindI64(stmt, bind_index, @intCast(value)),
-        .ComptimeFloat => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(value)),
-        .Int => |int| {
+        .@"null" => rc = c.duckdb_bind_null(stmt, bind_index),
+        .comptime_int => rc = bindI64(stmt, bind_index, @intCast(value)),
+        .comptime_float => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(value)),
+        .int => |int| {
             if (int.signedness == .signed) {
                 switch (int.bits) {
                     1...8 => rc = c.duckdb_bind_int8(stmt, bind_index, @intCast(value)),
@@ -193,15 +193,15 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
                 }
             }
         },
-        .Float => |float| {
+        .float => |float| {
             switch (float.bits) {
                 1...32 => rc = c.duckdb_bind_float(stmt, bind_index, @floatCast(value)),
                 33...64 => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(value)),
                 else => bindError(T),
             }
         },
-        .Bool => rc = c.duckdb_bind_boolean(stmt, bind_index, value),
-        .Pointer => |ptr| {
+        .bool => rc = c.duckdb_bind_boolean(stmt, bind_index, value),
+        .pointer => |ptr| {
             switch (ptr.size) {
                 .Slice => {
                     if (ptr.is_const) {
@@ -211,7 +211,7 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
                     }
                 },
                 .One => switch (@typeInfo(ptr.child)) {
-                    .Array => {
+                    .array => {
                         const Slice = []const std.meta.Elem(ptr.child);
                         rc = bindSlice(stmt, bind_index, @as(Slice, value));
                     },
@@ -220,15 +220,15 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
                 else => bindError(T),
             }
         },
-        .Array => rc = try bindValue(@TypeOf(&value), stmt, &value, bind_index),
-        .Optional => |opt| {
+        .array => rc = try bindValue(@TypeOf(&value), stmt, &value, bind_index),
+        .optional => |opt| {
             if (value) |v| {
                 rc = try bindValue(opt.child, stmt, v, bind_index);
             } else {
                 rc = c.duckdb_bind_null(stmt, bind_index);
             }
         },
-        .Struct => {
+        .@"struct" => {
             if (T == Date) {
                 rc = c.duckdb_bind_date(stmt, bind_index, c.duckdb_to_date(value));
             } else if (T == Time) {

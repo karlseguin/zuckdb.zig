@@ -24,7 +24,7 @@ pub const Row = struct {
         const vector = self.vectors[col];
 
         const TT = switch (@typeInfo(T)) {
-            .Optional => |opt| blk: {
+            .optional => |opt| blk: {
                 if (_isNull(vector.validity.?, index)) return null;
                 break :blk opt.child;
             },
@@ -141,7 +141,7 @@ pub fn List(comptime T: type) type {
             const index = i + self._offset;
 
             const TT = switch (@typeInfo(T)) {
-                .Optional => |opt| blk: {
+                .optional => |opt| blk: {
                     if (_isNull(self._validity, index)) return null;
                     break :blk opt.child;
                 },
@@ -191,7 +191,7 @@ pub const LazyList = struct {
         const index = i + self._offset;
 
         const TT = switch (@typeInfo(T)) {
-            .Optional => |opt| blk: {
+            .optional => |opt| blk: {
                 if (_isNull(self._validity, index)) return null;
                 break :blk opt.child;
             },

@@ -165,7 +165,7 @@ pub fn stringZ(str: anytype, allocator: Allocator) !StringZ {
 
 fn isNullTerminatedString(comptime T: type) bool {
     switch (@typeInfo(T)) {
-        .Pointer => |ptr| switch (ptr.size) {
+        .pointer => |ptr| switch (ptr.size) {
             .One => return isNullTerminatedString(ptr.child),
             .Slice => {
                 if (ptr.child == u8) {
@@ -175,7 +175,7 @@ fn isNullTerminatedString(comptime T: type) bool {
             },
             else => return false,
         },
-        .Array => |arr| {
+        .array => |arr| {
             if (arr.child == u8) {
                 if (std.meta.sentinel(T)) |s| return s == 0;
             }
@@ -187,7 +187,7 @@ fn isNullTerminatedString(comptime T: type) bool {
 
 fn isStringSlice(comptime T: type) bool {
     switch (@typeInfo(T)) {
-        .Pointer => |ptr| switch (ptr.size) {
+        .pointer => |ptr| switch (ptr.size) {
             .Slice => return ptr.child == u8 and ptr.sentinel == null,
             else => {},
         },
@@ -198,7 +198,7 @@ fn isStringSlice(comptime T: type) bool {
 
 fn isStringArray(comptime T: type) bool {
     switch (@typeInfo(T)) {
-        .Array => |arr| return arr.child == u8,
+        .array => |arr| return arr.child == u8,
         else => return false,
     }
 }

@@ -180,7 +180,7 @@ pub const Appender = struct {
         const T = @TypeOf(value);
         const type_info = @typeInfo(T);
         switch (type_info) {
-            .Null => {
+            .null => {
                 const validity = vector.validity orelse blk: {
                     c.duckdb_vector_ensure_validity_writable(vector.vector);
                     const v = c.duckdb_vector_get_validity(vector.vector);
@@ -190,18 +190,18 @@ pub const Appender = struct {
                 c.duckdb_validity_set_row_invalid(validity, row_index);
                 return;
             },
-            .Optional => {
+            .optional => {
                 if (value) |v| {
                     return self.appendValue(v, column);
                 } else {
                     return self.appendValue(null, column);
                 }
             },
-            .Pointer => |ptr| {
+            .pointer => |ptr| {
                 switch (ptr.size) {
                     .Slice => return self.appendSlice(vector, @as([]const ptr.child, value), row_index),
                     .One => switch (@typeInfo(ptr.child)) {
-                        .Array => {
+                        .array => {
                             const Slice = []const std.meta.Elem(ptr.child);
                             return self.appendSlice(vector, @as(Slice, value), row_index);
                         },
@@ -210,7 +210,7 @@ pub const Appender = struct {
                     else => appendError(T),
                 }
             },
-            .Array => return self.appendValue(&value, column),
+            .array => return self.appendValue(&value, column),
             else => {},
         }
 
@@ -219,13 +219,13 @@ pub const Appender = struct {
             .scalar => |scalar| switch (scalar) {
                 .bool => |data| {
                     switch (type_info) {
-                        .Bool => data[row_index] = value,
+                        .bool => data[row_index] = value,
                         else => return self.appendTypeError("boolean", T),
                     }
                 },
                 .i8 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.TINYINT_MIN or value > lib.TINYINT_MAX) return self.appendIntRangeError("tinyint");
                             data[row_index] = @intCast(value);
                         },
@@ -234,7 +234,7 @@ pub const Appender = struct {
                 },
                 .i16 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.SMALLINT_MIN or value > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
                             data[row_index] = @intCast(value);
                         },
@@ -243,7 +243,7 @@ pub const Appender = struct {
                 },
                 .i32 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.INTEGER_MIN or value > lib.INTEGER_MAX) return self.appendIntRangeError("integer");
                             data[row_index] = @intCast(value);
                         },
@@ -252,7 +252,7 @@ pub const Appender = struct {
                 },
                 .i64 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("bigint");
                             data[row_index] = @intCast(value);
                         },
@@ -261,7 +261,7 @@ pub const Appender = struct {
                 },
                 .i128 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.HUGEINT_MIN or value > lib.HUGEINT_MAX) return self.appendIntRangeError("hugeint");
                             data[row_index] = @intCast(value);
                         },
@@ -270,7 +270,7 @@ pub const Appender = struct {
                 },
                 .u8 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.UTINYINT_MIN or value > lib.UTINYINT_MAX) return self.appendIntRangeError("utinyint");
                             data[row_index] = @intCast(value);
                         },
@@ -279,7 +279,7 @@ pub const Appender = struct {
                 },
                 .u16 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.USMALLINT_MIN or value > lib.USMALLINT_MAX) return self.appendIntRangeError("usmallint");
                             data[row_index] = @intCast(value);
                         },
@@ -288,7 +288,7 @@ pub const Appender = struct {
                 },
                 .u32 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.UINTEGER_MIN or value > lib.UINTEGER_MAX) return self.appendIntRangeError("uinteger");
                             data[row_index] = @intCast(value);
                         },
@@ -297,7 +297,7 @@ pub const Appender = struct {
                 },
                 .u64 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.UBIGINT_MIN or value > lib.UBIGINT_MAX) return self.appendIntRangeError("ubingint");
                             data[row_index] = @intCast(value);
                         },
@@ -306,7 +306,7 @@ pub const Appender = struct {
                 },
                 .u128 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.UHUGEINT_MIN or value > lib.UHUGEINT_MAX) return self.appendIntRangeError("uhugeint");
                             data[row_index] = @intCast(value);
                         },
@@ -315,15 +315,15 @@ pub const Appender = struct {
                 },
                 .f32 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
-                        .Float, .ComptimeFloat => data[row_index] = @floatCast(value),
+                        .int, .comptime_int => data[row_index] = @floatFromInt(value),
+                        .float, .comptime_float => data[row_index] = @floatCast(value),
                         else => return self.appendTypeError("real", T),
                     }
                 },
                 .f64 => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => data[row_index] = @floatFromInt(value),
-                        .Float, .ComptimeFloat => data[row_index] = @floatCast(value),
+                        .int, .comptime_int => data[row_index] = @floatFromInt(value),
+                        .float, .comptime_float => data[row_index] = @floatCast(value),
                         else => return self.appendTypeError("double", T),
                     }
                 },
@@ -344,7 +344,7 @@ pub const Appender = struct {
                 },
                 .timestamp => |data| {
                     switch (type_info) {
-                        .Int, .ComptimeInt => {
+                        .int, .comptime_int => {
                             if (value < lib.BIGINT_MIN or value > lib.BIGINT_MAX) return self.appendIntRangeError("i64");
                             data[row_index] = @intCast(value);
                         },
@@ -355,12 +355,12 @@ pub const Appender = struct {
                 .varchar => {
                     var buf: [std.fmt.format_float.min_buffer_size]u8 = undefined;
                     const v = switch (type_info) {
-                        .Int, .ComptimeInt => blk: {
+                        .int, .comptime_int => blk: {
                             const n = std.fmt.formatIntBuf(&buf, value, 10, .lower, .{});
                             break :blk buf[0..n];
                         },
-                        .Float, .ComptimeFloat => try std.fmt.formatFloat(&buf, value, .{}),
-                        .Bool => if (value == true) "true" else "false",
+                        .float, .comptime_float => try std.fmt.formatFloat(&buf, value, .{}),
+                        .bool => if (value == true) "true" else "false",
                         else => {
                             const err = try std.fmt.allocPrint(self.allocator, "cannot bind a {any} (type {s}) to a varchar column", .{ value, @typeName(T) });
                             self.setErr(err, true);
@@ -371,7 +371,7 @@ pub const Appender = struct {
                 },
                 .uuid => |data| {
                     switch (type_info) {
-                        .Int => |int| {
+                        .int => |int| {
                             if (int.signedness == .signed and int.bits == 128) {
                                 data[row_index] = value;
                                 return;
@@ -504,7 +504,7 @@ pub const Appender = struct {
     fn setDecimal(self: *Appender, value: anytype, vector: Vector.Decimal, row_index: usize) !void {
         const T = @TypeOf(value);
         switch (@typeInfo(T)) {
-            .Int, .ComptimeInt => switch (vector.internal) {
+            .int, .comptime_int => switch (vector.internal) {
                 .i16 => |data| {
                     if (value < lib.SMALLINT_MIN or value > lib.SMALLINT_MAX) return self.appendIntRangeError("smallint");
                     data[row_index] = @intCast(value);
@@ -522,7 +522,7 @@ pub const Appender = struct {
                     data[row_index] = @intCast(value);
                 },
             },
-            .Float, .ComptimeFloat => {
+            .float, .comptime_float => {
                 // YES, there's a lot of duplication going on. But, I don't think the float and int codepaths can be merged
                 // without forcing int value to an i128, which seems wasteful to me.
                 const huge: i128 = switch (vector.scale) {
@@ -756,7 +756,7 @@ pub const Appender = struct {
 
 fn OptionalType(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .Optional => return T,
+        .optional => return T,
         else => return ?T,
     }
 }
