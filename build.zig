@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) !void {
     const zuckdb = b.addModule("zuckdb", .{
         .root_source_file = b.path("src/zuckdb.zig"),
     });
-    zuckdb.addIncludePath(b.path("lib/"));
+    zuckdb.addIncludePath(lib_path);
 
     {
         // Setup Tests

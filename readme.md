@@ -27,15 +27,10 @@ Any non-primitive value that you get from the `row` are valid only until the nex
 ## Install
 This library is tested with DuckDB 1.1.0.
 
-1) Add into `dependencies` at `build.zig.zon`:
-```zig
-.dependencies = .{
-    ...
-    .zuckdb = .{
-        .url = "git+https://github.com/karlseguin/zuckdb.zig#master",
-        .hash = "{{ actual_hash string, remove this line before 'zig build' to get actual hash }}",
-    },
-},
+1) Add zuckdb as a dependency in your `build.zig.zon`:
+
+```bash
+zig fetch --save git+https://github.com/karlseguin/zuckdb.zig#master
 ```
 
 2) Download the libduckdb from the <a href="https://duckdb.org/docs/installation/index.html?version=latest&environment=cplusplus&installer=binary">DuckDB download page</a>. 
@@ -50,25 +45,21 @@ const zuckdb = b.dependency("zuckdb", .{
     .optimize = optimize,
 }).module("zuckdb");
 
-// tell zuckdb.zig where to find the duckdb.h file
-zuckdb.addIncludePath(LazyPath.relative("lib/"));
-
 // Your app's program
 const exe = b.addExecutable(.{
     .name = "run",
-    .root_source_file = .{ .path = "test.zig" },
     .target = target,
     .optimize = optimize,
+    .root_source_file = b.path("src/main.zig"),
 });
+// include the zuckdb module
 exe.root_module.addImport("zuckdb", zuckdb);
 
 // link to libduckdb
 exe.linkSystemLibrary("duckdb"); 
 
 // tell the linker where to find libduckdb.so (linux) or libduckdb.dylib (macos)
-exe.addLibraryPath(LazyPath.relative("lib/"));
-
-// add other imports
+exe.addLibraryPath(b.path("lib/"));
 ```
 
 ### Static Linking
@@ -88,7 +79,7 @@ Finally, Add the following to your `build.zig`:
 ```zig
 exe.linkSystemLibrary("duckdb");
 exe.linkSystemLibrary("stdc++");
-exe.addLibraryPath(LazyPath.relative("lib/"));
+exe.addLibraryPath(b.path("lib/"));
 ```
 
 # DB
