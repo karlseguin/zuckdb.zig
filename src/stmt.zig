@@ -251,6 +251,8 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
 fn bindI64(stmt: c.duckdb_prepared_statement, bind_index: usize, value: i64) c_uint {
     switch (c.duckdb_param_type(stmt, bind_index)) {
         c.DUCKDB_TYPE_TIMESTAMP, c.DUCKDB_TYPE_TIMESTAMP_TZ => return c.duckdb_bind_timestamp(stmt, bind_index, .{ .micros = value }),
+        c.DUCKDB_TYPE_TIMESTAMP_MS => return c.duckdb_bind_timestamp(stmt, bind_index, .{ .micros = value * std.time.us_per_ms }),
+        c.DUCKDB_TYPE_TIMESTAMP_S => return c.duckdb_bind_timestamp(stmt, bind_index, .{ .micros = value * std.time.us_per_s }),
         else => return c.duckdb_bind_int64(stmt, bind_index, value),
     }
 }
@@ -501,15 +503,17 @@ test "bind: date/time" {
     const date = Date{ .year = 2023, .month = 5, .day = 10 };
     const time = Time{ .hour = 21, .min = 4, .sec = 49, .micros = 123456 };
     const interval = Interval{ .months = 3, .days = 7, .micros = 982810 };
-    var rows = try conn.query("select $1::date, $2::time, $3::timestamp, $4::interval, $5::interval", .{ date, time, 751203002000000, interval, "9298392 days" });
+    var rows = try conn.query("select $1::date, $2::time, $3::timestamp, $4::timestamp_ms, $5::timestamp_s, $6::interval, $7::interval", .{ date, time, 751203002000000, 751203002000, 751203002, interval, "9298392 days" });
     defer rows.deinit();
 
     const row = (try rows.next()).?;
     try t.expectEqual(date, row.get(Date, 0));
     try t.expectEqual(time, row.get(Time, 1));
     try t.expectEqual(751203002000000, row.get(i64, 2));
-    try t.expectEqual(interval, row.get(Interval, 3));
-    try t.expectEqual(Interval{ .months = 0, .days = 9298392, .micros = 0 }, row.get(Interval, 4));
+    try t.expectEqual(751203002000, row.get(i64, 3));
+    try t.expectEqual(751203002, row.get(i64, 4));
+    try t.expectEqual(interval, row.get(Interval, 5));
+    try t.expectEqual(Interval{ .months = 0, .days = 9298392, .micros = 0 }, row.get(Interval, 6));
 }
 
 test "bind: enum" {
@@ -593,12 +597,13 @@ test "query parameters" {
         \\ $2::tinyint, $3::smallint, $4::integer, $5::bigint, $6::hugeint,
         \\ $7::utinyint, $8::usmallint, $9::uinteger, $10::ubigint,
         \\ $11::real, $12::double, $13::decimal,
-        \\ $14::timestamp, $15::date, $16::time, $17::interval,
-        \\ $18::varchar, $19::blob
+        \\ $14::timestamp, $15::timestamp_ms, $16::timestamp_s,
+        \\ $17::date, $18::time, $19::interval,
+        \\ $20::varchar, $21::blob
     , .{ .auto_release = false });
     defer stmt.deinit();
 
-    try t.expectEqual(19, stmt.numberOfParameters());
+    try t.expectEqual(21, stmt.numberOfParameters());
 
     // bool
     try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BOOLEAN), stmt.dataTypeC(0));
@@ -637,18 +642,22 @@ test "query parameters" {
     // time
     try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIMESTAMP), stmt.dataTypeC(13));
     try t.expectEqual(DataType.timestamp, stmt.dataType(13));
-    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DATE), stmt.dataTypeC(14));
-    try t.expectEqual(DataType.date, stmt.dataType(14));
-    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIME), stmt.dataTypeC(15));
-    try t.expectEqual(DataType.time, stmt.dataType(15));
-    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTERVAL), stmt.dataTypeC(16));
-    try t.expectEqual(DataType.interval, stmt.dataType(16));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIMESTAMP_MS), stmt.dataTypeC(14));
+    try t.expectEqual(DataType.timestamp_ms, stmt.dataType(14));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIMESTAMP_S), stmt.dataTypeC(15));
+    try t.expectEqual(DataType.timestamp_s, stmt.dataType(15));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_DATE), stmt.dataTypeC(16));
+    try t.expectEqual(DataType.date, stmt.dataType(16));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_TIME), stmt.dataTypeC(17));
+    try t.expectEqual(DataType.time, stmt.dataType(17));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_INTERVAL), stmt.dataTypeC(18));
+    try t.expectEqual(DataType.interval, stmt.dataType(18));
 
     // varchar & blob
-    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_VARCHAR), stmt.dataTypeC(17));
-    try t.expectEqual(DataType.varchar, stmt.dataType(17));
-    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BLOB), stmt.dataTypeC(18));
-    try t.expectEqual(DataType.blob, stmt.dataType(18));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_VARCHAR), stmt.dataTypeC(19));
+    try t.expectEqual(DataType.varchar, stmt.dataType(19));
+    try t.expectEqual(@as(c_uint, c.DUCKDB_TYPE_BLOB), stmt.dataTypeC(20));
+    try t.expectEqual(DataType.blob, stmt.dataType(20));
 }
 
 test "Stmt: exec" {
