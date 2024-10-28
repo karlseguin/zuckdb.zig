@@ -126,7 +126,7 @@ pub const Vector = struct {
                         };
                         return .{ .decimal = .{ .width = width, .scale = scale, .type = internal_type } };
                     },
-                    c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT, c.DUCKDB_TYPE_TINYINT, c.DUCKDB_TYPE_SMALLINT, c.DUCKDB_TYPE_INTEGER, c.DUCKDB_TYPE_BIGINT, c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID, c.DUCKDB_TYPE_UHUGEINT, c.DUCKDB_TYPE_UTINYINT, c.DUCKDB_TYPE_USMALLINT, c.DUCKDB_TYPE_UINTEGER, c.DUCKDB_TYPE_UBIGINT, c.DUCKDB_TYPE_BOOLEAN, c.DUCKDB_TYPE_FLOAT, c.DUCKDB_TYPE_DOUBLE, c.DUCKDB_TYPE_DATE, c.DUCKDB_TYPE_TIME, c.DUCKDB_TYPE_TIMESTAMP, c.DUCKDB_TYPE_TIMESTAMP_TZ, c.DUCKDB_TYPE_INTERVAL => return .{ .simple = type_id },
+                    c.DUCKDB_TYPE_BLOB, c.DUCKDB_TYPE_VARCHAR, c.DUCKDB_TYPE_BIT, c.DUCKDB_TYPE_TINYINT, c.DUCKDB_TYPE_SMALLINT, c.DUCKDB_TYPE_INTEGER, c.DUCKDB_TYPE_BIGINT, c.DUCKDB_TYPE_HUGEINT, c.DUCKDB_TYPE_UUID, c.DUCKDB_TYPE_UHUGEINT, c.DUCKDB_TYPE_UTINYINT, c.DUCKDB_TYPE_USMALLINT, c.DUCKDB_TYPE_UINTEGER, c.DUCKDB_TYPE_UBIGINT, c.DUCKDB_TYPE_BOOLEAN, c.DUCKDB_TYPE_FLOAT, c.DUCKDB_TYPE_DOUBLE, c.DUCKDB_TYPE_DATE, c.DUCKDB_TYPE_TIME, c.DUCKDB_TYPE_TIMESTAMP, c.DUCKDB_TYPE_TIMESTAMP_MS, c.DUCKDB_TYPE_TIMESTAMP_S, c.DUCKDB_TYPE_TIMESTAMP_TZ, c.DUCKDB_TYPE_INTERVAL => return .{ .simple = type_id },
                     else => return error.UnknownDataType,
                 }
             }
@@ -301,6 +301,8 @@ fn scalarData(scalar_type: *Vector.Type.Scalar, real_vector: c.duckdb_vector) Ve
             c.DUCKDB_TYPE_DATE => return .{ .date = @ptrCast(@alignCast(raw_data)) },
             c.DUCKDB_TYPE_TIME => return .{ .time = @ptrCast(@alignCast(raw_data)) },
             c.DUCKDB_TYPE_TIMESTAMP => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
+            c.DUCKDB_TYPE_TIMESTAMP_MS => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
+            c.DUCKDB_TYPE_TIMESTAMP_S => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
             c.DUCKDB_TYPE_TIMESTAMP_TZ => return .{ .timestamp = @ptrCast(@alignCast(raw_data)) },
             c.DUCKDB_TYPE_INTERVAL => return .{ .interval = @ptrCast(@alignCast(raw_data)) },
             else => unreachable,
@@ -359,6 +361,8 @@ test "Vector: write type" {
         \\   col_time time,
         \\   col_interval interval,
         \\   col_timestamp timestamp,
+        \\   col_timestamp_ms timestamp_ms,
+        \\   col_timestamp_s timestamp_s,
         \\   col_decimal decimal(18, 6),
         \\   col_tinyint_arr tinyint[],
         \\   col_decimal_arr decimal(5, 4)[],
@@ -393,11 +397,13 @@ test "Vector: write type" {
     try expectTypeName(&arr, rows.vectors[17], "time");
     try expectTypeName(&arr, rows.vectors[18], "interval");
     try expectTypeName(&arr, rows.vectors[19], "timestamp");
-    try expectTypeName(&arr, rows.vectors[20], "decimal(18,6)");
-    try expectTypeName(&arr, rows.vectors[21], "tinyint[]");
-    try expectTypeName(&arr, rows.vectors[22], "decimal(5,4)[]");
-    try expectTypeName(&arr, rows.vectors[23], "JSON");
-    try expectTypeName(&arr, rows.vectors[24], "timestamptz");
+    try expectTypeName(&arr, rows.vectors[20], "timestamp_ms");
+    try expectTypeName(&arr, rows.vectors[21], "timestamp_s");
+    try expectTypeName(&arr, rows.vectors[22], "decimal(18,6)");
+    try expectTypeName(&arr, rows.vectors[23], "tinyint[]");
+    try expectTypeName(&arr, rows.vectors[24], "decimal(5,4)[]");
+    try expectTypeName(&arr, rows.vectors[25], "JSON");
+    try expectTypeName(&arr, rows.vectors[26], "timestamptz");
 }
 
 fn expectTypeName(arr: *std.ArrayList(u8), vector: Vector, expected: []const u8) !void {
