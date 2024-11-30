@@ -115,6 +115,7 @@ pub const Pool = struct {
         const conns = self.conns;
 
         self.mutex.lock();
+        errdefer self.mutex.unlock();
         while (true) {
             if (self.shutdown) {
                 return error.PoolShuttingDown;
