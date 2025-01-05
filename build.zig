@@ -20,21 +20,24 @@ pub fn build(b: *std.Build) !void {
             zuckdb.linkSystemLibrary("duckdb", .{});
             break :blk b.path("lib/duckdb.h");
         } else {
-            const c_dep = b.dependency("duckdb", .{});
-            const lib_path = c_dep.path("");
-            const c_lib = b.addStaticLibrary(.{
-                .name = "duckdb",
-                .target = target,
-                .optimize = optimize,
-            });
-            c_lib.linkLibCpp();
-            c_lib.addIncludePath(lib_path);
-            c_lib.addCSourceFiles(.{
-                .files = &.{"duckdb.cpp"},
-                .root = c_dep.path(""),
-            });
-            zuckdb.linkLibrary(c_lib);
-            break :blk c_dep.path("duckdb.h");
+            if (b.lazyDependency("duckdb", .{})) |c_dep| {
+                const lib_path = c_dep.path("");
+                const c_lib = b.addStaticLibrary(.{
+                    .name = "duckdb",
+                    .target = target,
+                    .optimize = optimize,
+                });
+                c_lib.linkLibCpp();
+                c_lib.addIncludePath(lib_path);
+                c_lib.addCSourceFiles(.{
+                    .files = &.{"duckdb.cpp"},
+                    .root = c_dep.path(""),
+                });
+                zuckdb.linkLibrary(c_lib);
+                break :blk c_dep.path("duckdb.h");
+            } else {
+                break :blk b.path("");
+            }
         }
     };
 
