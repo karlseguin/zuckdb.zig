@@ -25,7 +25,7 @@ while (try rows.next()) |row| {
 Any non-primitive value that you get from the `row` are valid only until the next call to `next` or `deinit`.
 
 ## Install
-This library is tested with DuckDB 1.1.0.
+This library is tested with DuckDB 1.1.0. You can either link to an existing libduckdb on your system, or have zuckdb download and build DuckDB for you (this will take time.)
 
 1) Add zuckdb as a dependency in your `build.zig.zon`:
 
@@ -33,11 +33,13 @@ This library is tested with DuckDB 1.1.0.
 zig fetch --save git+https://github.com/karlseguin/zuckdb.zig#master
 ```
 
-2) Download the libduckdb from the <a href="https://duckdb.org/docs/installation/index.html?version=latest&environment=cplusplus&installer=binary">DuckDB download page</a>. 
+### Link to libduckdb
 
-3) Place the `duckdb.h` file and the `libduckdb.so` (linux) or `libduckdb.dylib` (mac) in your project's `lib` folder.
+1) Download the libduckdb from the <a href="https://duckdb.org/docs/installation/index.html?version=latest&environment=cplusplus&installer=binary">DuckDB download page</a>. 
 
-4) Add this in `build.zig`:
+2) Place the `duckdb.h` file and the `libduckdb.so` (linux) or `libduckdb.dylib` (mac) in your project's `lib` folder.
+
+3) Add this in `build.zig`:
 
 ```zig
 const zuckdb = b.dependency("zuckdb", .{
@@ -60,6 +62,29 @@ exe.linkSystemLibrary("duckdb");
 
 // tell the linker where to find libduckdb.so (linux) or libduckdb.dylib (macos)
 exe.addLibraryPath(b.path("lib/"));
+```
+
+### Automatically fetch and buikd DuckDB
+
+1) Add this in `build.zig`:
+
+```zig
+const zuckdb = b.dependency("zuckdb", .{
+    .target = target,
+    .optimize = optimize,
+    .system_libduckdb = false,
+    .debug_duckdb = false, // optional, compile DuckDB with DUCKDB_DEBUG_STACKTRACE  or not
+}).module("zuckdb");
+
+// Your app's program
+const exe = b.addExecutable(.{
+    .name = "run",
+    .target = target,
+    .optimize = optimize,
+    .root_source_file = b.path("src/main.zig"),
+});
+// include the zuckdb module
+exe.root_module.addImport("zuckdb", zuckdb);
 ```
 
 ### Static Linking

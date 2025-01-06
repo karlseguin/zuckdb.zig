@@ -5,8 +5,8 @@ const LazyPath = std.Build.LazyPath;
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const system_libduckdb = b.option(bool, "system-libduckdb", "link with system libduckdb") orelse false;
-    const debug_duckdb = b.option(bool, "debug-duckdb", "compile duckdb with DUCKDB_DEBUG_STACKTRACE") orelse false;
+    const system_libduckdb = b.option(bool, "system_libduckdb", "link with system libduckdb") orelse true;
+    const debug_duckdb = b.option(bool, "debug_duckdb", "compile duckdb with DUCKDB_DEBUG_STACKTRACE") orelse false;
 
     const zuckdb = b.addModule("zuckdb", .{
         .root_source_file = b.path("src/zuckdb.zig"),
