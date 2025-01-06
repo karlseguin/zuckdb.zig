@@ -1,4 +1,4 @@
-pub const c = @cImport(@cInclude("duckdb.h"));
+pub const c = @import("duckdb_clib");
 
 const row = @import("row.zig");
 pub const Row = row.Row;
