@@ -199,8 +199,8 @@ pub const Appender = struct {
             },
             .pointer => |ptr| {
                 switch (ptr.size) {
-                    .Slice => return self.appendSlice(vector, @as([]const ptr.child, value), row_index),
-                    .One => switch (@typeInfo(ptr.child)) {
+                    .slice => return self.appendSlice(vector, @as([]const ptr.child, value), row_index),
+                    .one => switch (@typeInfo(ptr.child)) {
                         .array => {
                             const Slice = []const std.meta.Elem(ptr.child);
                             return self.appendSlice(vector, @as(Slice, value), row_index);

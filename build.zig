@@ -72,6 +72,10 @@ pub fn build(b: *std.Build) !void {
             ) orelse &.{},
             .test_runner = b.path("test_runner.zig"),
         });
+        lib_test.addRPath(b.path("lib"));
+        lib_test.addIncludePath(b.path("lib"));
+        lib_test.addLibraryPath(b.path("lib"));
+        lib_test.linkSystemLibrary("duckdb");
 
         const run_test = b.addRunArtifact(lib_test);
         run_test.has_side_effects = true;

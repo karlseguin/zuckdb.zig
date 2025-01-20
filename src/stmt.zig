@@ -203,14 +203,14 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
         .bool => rc = c.duckdb_bind_boolean(stmt, bind_index, value),
         .pointer => |ptr| {
             switch (ptr.size) {
-                .Slice => {
+                .slice => {
                     if (ptr.is_const) {
                         rc = bindSlice(stmt, bind_index, @as([]const ptr.child, value));
                     } else {
                         rc = bindSlice(stmt, bind_index, @as([]ptr.child, value));
                     }
                 },
-                .One => switch (@typeInfo(ptr.child)) {
+                .one => switch (@typeInfo(ptr.child)) {
                     .array => {
                         const Slice = []const std.meta.Elem(ptr.child);
                         rc = bindSlice(stmt, bind_index, @as(Slice, value));
