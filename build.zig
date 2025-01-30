@@ -70,7 +70,7 @@ pub fn build(b: *std.Build) !void {
                 "test-filter",
                 "test-filter",
             ) orelse &.{},
-            .test_runner = b.path("test_runner.zig"),
+            .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
         });
         lib_test.addRPath(b.path("lib"));
         lib_test.addIncludePath(b.path("lib"));
