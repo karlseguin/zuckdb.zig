@@ -209,6 +209,9 @@ pub const LazyList = struct {
 };
 
 inline fn _isNull(validity: [*c]u64, index: usize) bool {
+    if (validity == 0) {
+        return false;
+    }
     const entry_index = index / 64;
     const entry_mask = index % 64;
     return validity[entry_index] & std.math.shl(u64, 1, entry_mask) == 0;
