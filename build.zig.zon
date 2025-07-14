@@ -2,7 +2,7 @@
     .name = .zuckdb,
     .paths = .{""},
     .version = "0.0.0",
-    .fingerprint = 0xe57532405497940e,
+    .fingerprint = 0xe57532404501c85c,
     .dependencies = .{
         .duckdb = .{
             .lazy = true,
