@@ -353,13 +353,10 @@ pub const Appender = struct {
                 },
                 .decimal => |data| return self.setDecimal(value, data, row_index),
                 .varchar => {
-                    var buf: [std.fmt.format_float.min_buffer_size]u8 = undefined;
+                    var buf: [std.fmt.float.min_buffer_size]u8 = undefined;
                     const v = switch (type_info) {
-                        .int, .comptime_int => blk: {
-                            const n = std.fmt.formatIntBuf(&buf, value, 10, .lower, .{});
-                            break :blk buf[0..n];
-                        },
-                        .float, .comptime_float => try std.fmt.formatFloat(&buf, value, .{}),
+                        .int, .comptime_int => try std.fmt.bufPrint(&buf, "{d}", .{value}),
+                        .float, .comptime_float => try std.fmt.float.render(&buf, value, .{}),
                         .bool => if (value == true) "true" else "false",
                         else => {
                             const err = try std.fmt.allocPrint(self.allocator, "cannot bind a {any} (type {s}) to a varchar column", .{ value, @typeName(T) });
@@ -585,7 +582,7 @@ pub const Appender = struct {
         return self.appendTypeError(column_type, @TypeOf(values));
     }
 
-    fn setListTransform(self: *Appender, comptime T: type, comptime D: type, comptime column_type: []const u8, list: *Vector.List, values: anytype, data: anytype, transform: *const fn (T) callconv(.C) D) !void {
+    fn setListTransform(self: *Appender, comptime T: type, comptime D: type, comptime column_type: []const u8, list: *Vector.List, values: anytype, data: anytype, transform: *const fn (T) callconv(.c) D) !void {
         if (@TypeOf(values) == []const T) {
             for (values, 0..) |value, i| {
                 data[i] = transform(value);

@@ -23,10 +23,9 @@ pub fn build(b: *std.Build) !void {
         } else {
             if (b.lazyDependency("duckdb", .{})) |c_dep| {
                 const lib_path = c_dep.path("");
-                const c_lib = b.addStaticLibrary(.{
+                const c_lib = b.addLibrary(.{
                     .name = "duckdb",
-                    .target = target,
-                    .optimize = optimize,
+                    .root_module = zuckdb,
                 });
                 c_lib.linkLibCpp();
                 c_lib.addIncludePath(lib_path);
