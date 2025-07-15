@@ -467,7 +467,7 @@ test "conn: prepare error" {
     defer conn.deinit();
 
     try t.expectError(error.DuckDBError, conn.prepare("select x", .{}));
-    try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\nLINE 1: select x\n               ^", conn.err.?);
+    try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\n\nLINE 1: select x\n               ^", conn.err.?);
 }
 
 test "conn: query cache" {
