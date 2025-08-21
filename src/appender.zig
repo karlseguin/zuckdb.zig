@@ -1144,7 +1144,7 @@ test "Appender: decimal fuzz" {
     var expected_i16: [COUNT]f64 = undefined;
     var expected_i32: [COUNT]f64 = undefined;
     var expected_i64: [COUNT]f64 = undefined;
-    var expected_i128: [COUNT]f64 = undefined;
+    var expected_i128: [COUNT]f128 = undefined;
     {
         var seed: u64 = undefined;
         std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
@@ -1161,7 +1161,7 @@ test "Appender: decimal fuzz" {
             expected_i32[i] = d2;
             const d3 = @trunc(random.float(f64) * 10000000000000000) / 100000;
             expected_i64[i] = d3;
-            const d4 = @trunc(random.float(f64) * 100000000000000000000000000000) / 10000000000;
+            const d4 = @trunc(@as(f128, random.float(f64)) * 100000000000000000000000000000) / 10000000000;
             expected_i128[i] = d4;
 
             try appender.appendRow(.{ d1, d2, d3, d4 });
@@ -1203,7 +1203,7 @@ test "Appender: optional values" {
             const non_null_data: ?i32 = i;
             const null_data: ?i32 = null;
 
-            try appender.appendRow(.{ i, non_null_data, null_data});
+            try appender.appendRow(.{ i, non_null_data, null_data });
         }
         try appender.flush();
     }

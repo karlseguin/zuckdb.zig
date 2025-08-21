@@ -168,7 +168,7 @@ pub const Stmt = struct {
 fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype, bind_index: usize) !c_uint {
     var rc: c_uint = 0;
     switch (@typeInfo(T)) {
-        .@"null" => rc = c.duckdb_bind_null(stmt, bind_index),
+        .null => rc = c.duckdb_bind_null(stmt, bind_index),
         .comptime_int => rc = bindI64(stmt, bind_index, @intCast(value)),
         .comptime_float => rc = c.duckdb_bind_double(stmt, bind_index, @floatCast(value)),
         .int => |int| {
@@ -460,9 +460,9 @@ test "bind: text" {
 
     {
         // runtime varchar
-        var list = std.ArrayList([]const u8).init(t.allocator);
-        defer list.deinit();
-        try list.append("i love keemun");
+        var list: std.ArrayList([]const u8) = .empty;
+        defer list.deinit(t.allocator);
+        try list.append(t.allocator, "i love keemun");
 
         var rows = try conn.query("select $1::varchar", .{list.items[0]});
         defer rows.deinit();
@@ -481,9 +481,9 @@ test "bind: text" {
 
     {
         // runtime blob
-        var list = std.ArrayList([]const u8).init(t.allocator);
-        defer list.deinit();
-        try list.append("i love keemun2");
+        var list: std.ArrayList([]const u8) = .empty;
+        defer list.deinit(t.allocator);
+        try list.append(t.allocator, "i love keemun2");
 
         var rows = try conn.query("select $1::blob", .{list.items[0]});
         defer rows.deinit();

@@ -374,8 +374,8 @@ test "Vector: write type" {
     const rows = try conn.query("select * from all_types", .{});
     defer rows.deinit();
 
-    var arr = std.ArrayList(u8).init(t.allocator);
-    defer arr.deinit();
+    var arr: std.ArrayList(u8) = .empty;
+    defer arr.deinit(t.allocator);
 
     try expectTypeName(&arr, rows.vectors[0], "tinyint");
     try expectTypeName(&arr, rows.vectors[1], "smallint");
@@ -408,6 +408,6 @@ test "Vector: write type" {
 
 fn expectTypeName(arr: *std.ArrayList(u8), vector: Vector, expected: []const u8) !void {
     arr.clearRetainingCapacity();
-    try vector.writeType(arr.writer());
+    try vector.writeType(arr.writer(t.allocator));
     try t.expectEqualStrings(expected, arr.items);
 }
