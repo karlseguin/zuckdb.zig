@@ -460,9 +460,9 @@ test "bind: text" {
 
     {
         // runtime varchar
-        var list = std.ArrayList([]const u8).init(t.allocator);
-        defer list.deinit();
-        try list.append("i love keemun");
+        var list: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer list.deinit(t.allocator);
+        try list.append(t.allocator, "i love keemun");
 
         var rows = try conn.query("select $1::varchar", .{list.items[0]});
         defer rows.deinit();
@@ -481,9 +481,9 @@ test "bind: text" {
 
     {
         // runtime blob
-        var list = std.ArrayList([]const u8).init(t.allocator);
-        defer list.deinit();
-        try list.append("i love keemun2");
+        var list: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer list.deinit(t.allocator);
+        try list.append(t.allocator, "i love keemun2");
 
         var rows = try conn.query("select $1::blob", .{list.items[0]});
         defer rows.deinit();

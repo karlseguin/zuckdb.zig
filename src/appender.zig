@@ -1161,7 +1161,7 @@ test "Appender: decimal fuzz" {
             expected_i32[i] = d2;
             const d3 = @trunc(random.float(f64) * 10000000000000000) / 100000;
             expected_i64[i] = d3;
-            const d4 = @trunc(random.float(f64) * 100000000000000000000000000000) / 10000000000;
+            const d4 = @trunc(random.float(f64) * @as(f64, @floatFromInt(10000000000000000000000000000))) / 10000000000;
             expected_i128[i] = d4;
 
             try appender.appendRow(.{ d1, d2, d3, d4 });
