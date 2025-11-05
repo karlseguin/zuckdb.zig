@@ -102,7 +102,7 @@ pub const Conn = struct {
     }
 
     pub fn queryCache(self: *Conn, name: []const u8, version: u32, sql: anytype, values: anytype) !Rows {
-        self.queryCacheWithState(name, version, sql, values, null);
+        return self.queryCacheWithState(name, version, sql, values, null);
     }
 
     pub fn queryWithState(self: *Conn, sql: anytype, values: anytype, state: anytype) !Rows {

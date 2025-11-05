@@ -235,7 +235,7 @@ pub const UHUGEINT_MAX = 340282366920938463463374607431768211455;
 const root = @import("root");
 const _assert = blk: {
     if (@hasDecl(root, "zuckdb_assert")) {
-        break :blk root.pg_assert;
+        break :blk root.zuckdb_assert;
     }
     switch (@import("builtin").mode) {
         .ReleaseFast, .ReleaseSmall => break :blk false,
