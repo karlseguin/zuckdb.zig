@@ -25,7 +25,10 @@ pub fn build(b: *std.Build) !void {
                 const lib_path = c_dep.path("");
                 const c_lib = b.addLibrary(.{
                     .name = "duckdb",
-                    .root_module = zuckdb,
+                    .root_module = b.createModule(.{
+                        .target = target,
+                        .optimize = optimize,
+                    }),
                 });
                 c_lib.linkLibCpp();
                 c_lib.addIncludePath(lib_path);
