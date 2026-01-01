@@ -25,7 +25,7 @@ while (try rows.next()) |row| {
 Any non-primitive value that you get from the `row` are valid only until the next call to `next` or `deinit`.
 
 ## Install
-This library is tested with DuckDB 1.3.2. You can either link to an existing libduckdb on your system, or have zuckdb download and build DuckDB for you (this will take time.)
+This library is tested with DuckDB 1.4.3. You can either link to an existing libduckdb on your system, or have zuckdb download and build DuckDB for you (this will take time.)
 
 1) Add zuckdb as a dependency in your `build.zig.zon`:
 
@@ -91,7 +91,7 @@ exe.root_module.addImport("zuckdb", zuckdb);
 It's also possible to statically link DuckDB. In order to do this, you must build DuckDB yourself, in order to [compile it using Zig C++](https://github.com/ziglang/zig/issues/9832#issuecomment-926832810) and using the [bundle-library](https://github.com/duckdb/duckdb/issues/9475) target
 
 ```
-git clone -b 1.3.2 --single-branch https://github.com/duckdb/duckdb.git
+git clone -b 1.4.3 --single-branch https://github.com/duckdb/duckdb.git
 cd duckdb
 export CXX="zig c++"
 DUCKDB_EXTENSIONS='json' make bundle-library
