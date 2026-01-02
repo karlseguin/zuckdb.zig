@@ -339,6 +339,8 @@ test "Vector: write type" {
     var conn = try db.conn();
     defer conn.deinit();
 
+    _ = try conn.exec("SET autoinstall_known_extensions=1", .{});
+    _ = try conn.exec("SET autoload_known_extensions=1", .{});
     _ = try conn.exec(
         \\ create table all_types (
         \\   col_tinyint tinyint,

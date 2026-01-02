@@ -732,6 +732,8 @@ test "Stmt: statementType" {
     }
 
     {
+        _ = try conn.exec("SET autoinstall_known_extensions=1", .{});
+        _ = try conn.exec("SET autoload_known_extensions=1", .{});
         const stmt = try conn.prepare("describe", .{});
         defer stmt.deinit();
         _ = try stmt.exec();

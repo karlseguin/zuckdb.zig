@@ -613,7 +613,8 @@ test "read list" {
 
     var conn = try db.conn();
     defer conn.deinit();
-
+    _ = try conn.exec("SET autoinstall_known_extensions=1", .{});
+    _ = try conn.exec("SET autoload_known_extensions=1", .{});
     _ = try conn.exec("create type my_type as enum ('type_a', 'type_b')", .{});
 
     {
@@ -738,7 +739,7 @@ test "owning row" {
     {
         // error case
         try t.expectError(error.DuckDBError, conn.row("select x", .{}));
-        try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\n\nLINE 1: select x\n               ^", conn.err.?);
+        try t.expectEqualStrings("Binder Error: Referenced column \"x\" was not found because the FROM clause is missing\n\nLINE 1: select x\n               ^", conn.err.?);
     }
 
     {
@@ -754,6 +755,8 @@ test "owning row" {
     }
 
     {
+        _ = try conn.exec("SET autoinstall_known_extensions=1", .{});
+        _ = try conn.exec("SET autoload_known_extensions=1", .{});
         const row = (try conn.row("select [1, 32, 99, null, -4]::int[]", .{})) orelse unreachable;
         defer row.deinit();
 

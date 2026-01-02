@@ -914,6 +914,8 @@ test "Appender: int/float/bool into varchar and json" {
     var conn = try db.conn();
     defer conn.deinit();
 
+    _ = try conn.exec("SET autoinstall_known_extensions=1", .{});
+    _ = try conn.exec("SET autoload_known_extensions=1", .{});
     _ = try conn.exec(
         \\ create table x (
         \\   id integer,
@@ -1228,6 +1230,8 @@ test "Appender: json" {
     var conn = try db.conn();
     defer conn.deinit();
 
+    _ = try conn.exec("SET autoinstall_known_extensions=1", .{});
+    _ = try conn.exec("SET autoload_known_extensions=1", .{});
     _ = try conn.exec("create table aj (id integer, data json)", .{});
 
     {
