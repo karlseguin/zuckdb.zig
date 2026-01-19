@@ -22,15 +22,20 @@ pub fn build(b: *std.Build) !void {
             break :blk b.path("lib/duckdb.h");
         } else {
             if (b.lazyDependency("duckdb", .{})) |c_dep| {
-                const lib_path = c_dep.path("");
+                const root_module = b.createModule(.{
+                    .target = target,
+                    .optimize = optimize,
+                });
+                root_module.addCMacro("__DATE__", b.fmt("\"{d}\"", .{std.time.timestamp()}));
+                root_module.addCMacro("__TIME__", b.fmt("\"{d}\"", .{std.time.timestamp()}));
+
                 const c_lib = b.addLibrary(.{
                     .name = "duckdb",
-                    .root_module = b.createModule(.{
-                        .target = target,
-                        .optimize = optimize,
-                    }),
+                    .root_module = root_module,
                 });
+
                 c_lib.linkLibCpp();
+                const lib_path = c_dep.path("");
                 c_lib.addIncludePath(lib_path);
                 c_lib.addCSourceFiles(.{
                     .files = &.{"duckdb.cpp"},
