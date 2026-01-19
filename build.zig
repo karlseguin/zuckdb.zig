@@ -35,7 +35,11 @@ pub fn build(b: *std.Build) !void {
                 c_lib.linkLibCpp();
                 const lib_path = c_dep.path("");
                 c_lib.addIncludePath(lib_path);
-                c_lib.addCSourceFiles(.{ .files = &.{"duckdb.cpp"}, .root = c_dep.path(""), .flags = &.{"-Wno-date-time"} });
+                c_lib.addCSourceFiles(.{
+                    .files = &.{"duckdb.cpp"},
+                    .root = c_dep.path(""),
+                    .flags = &.{"-Wno-date-time"},
+                });
                 if (debug_duckdb) {
                     c_lib.root_module.addCMacro("DUCKDB_DEBUG_STACKTRACE", "");
                 }
