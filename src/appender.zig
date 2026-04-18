@@ -773,7 +773,7 @@ pub fn encodeUUID(value: []const u8) !i128 {
 const t = std.testing;
 const DB = lib.DB;
 test "Appender: bind errors" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -796,7 +796,7 @@ test "Appender: bind errors" {
 }
 
 test "CannotAppendToDecimal" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -863,7 +863,7 @@ test "CannotAppendToDecimal" {
 }
 
 test "Appender: basic variants" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -908,7 +908,7 @@ test "Appender: basic variants" {
 }
 
 test "Appender: int/float/bool into varchar and json" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -972,7 +972,7 @@ test "Appender: int/float/bool into varchar and json" {
 }
 
 test "Appender: multiple chunks" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1015,7 +1015,7 @@ test "Appender: multiple chunks" {
 }
 
 test "Appender: implicit and explicit flush" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1062,7 +1062,7 @@ test "Appender: implicit and explicit flush" {
 }
 
 test "Appender: hugeint" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1073,17 +1073,14 @@ test "Appender: hugeint" {
     const COUNT = 1000;
     var expected: [COUNT]i128 = undefined;
     {
-        var seed: u64 = undefined;
-        std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
-        var prng = std.Random.DefaultPrng.init(seed);
-
-        const random = prng.random();
+        const rng_impl: std.Random.IoSource = .{ .io = t.io };
+        const rng = rng_impl.interface();
 
         var appender = try conn.appender(null, "x");
         defer appender.deinit();
 
         for (0..COUNT) |i| {
-            const value = random.int(i128);
+            const value = rng.int(i128);
             expected[i] = value;
             try appender.appendRow(.{value});
         }
@@ -1102,7 +1099,7 @@ test "Appender: hugeint" {
 }
 
 test "Appender: decimal" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1134,7 +1131,7 @@ test "Appender: decimal" {
 }
 
 test "Appender: decimal fuzz" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1148,22 +1145,20 @@ test "Appender: decimal fuzz" {
     var expected_i64: [COUNT]f64 = undefined;
     var expected_i128: [COUNT]f128 = undefined;
     {
-        var seed: u64 = undefined;
-        std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
-        var prng = std.Random.DefaultPrng.init(seed);
-        const random = prng.random();
+        const rng_impl: std.Random.IoSource = .{ .io = t.io };
+        const rng = rng_impl.interface();
 
         var appender = try conn.appender(null, "appdec");
         defer appender.deinit();
 
         for (0..COUNT) |i| {
-            const d1 = @trunc(random.float(f64) * 100) / 10;
+            const d1 = @trunc(rng.float(f64) * 100) / 10;
             expected_i16[i] = d1;
-            const d2 = @trunc(random.float(f64) * 100000000) / 1000;
+            const d2 = @trunc(rng.float(f64) * 100000000) / 1000;
             expected_i32[i] = d2;
-            const d3 = @trunc(random.float(f64) * 10000000000000000) / 100000;
+            const d3 = @trunc(rng.float(f64) * 10000000000000000) / 100000;
             expected_i64[i] = d3;
-            const d4 = @trunc(@as(f128, random.float(f64)) * 100000000000000000000000000000) / 10000000000;
+            const d4 = @trunc(@as(f128, rng.float(f64)) * 100000000000000000000000000000) / 10000000000;
             expected_i128[i] = d4;
 
             try appender.appendRow(.{ d1, d2, d3, d4 });
@@ -1186,7 +1181,7 @@ test "Appender: decimal fuzz" {
 }
 
 test "Appender: optional values" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1224,7 +1219,7 @@ test "Appender: optional values" {
 }
 
 test "Appender: json" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1247,7 +1242,7 @@ test "Appender: json" {
 }
 
 test "Appender: list simple types" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1433,7 +1428,7 @@ test "Appender: list simple types" {
 }
 
 test "Appender: list multiple" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1464,7 +1459,7 @@ test "Appender: list multiple" {
 }
 
 test "Appender: appendListMap int" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1489,7 +1484,7 @@ test "Appender: appendListMap int" {
 }
 
 test "Appender: appendListMap text" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1517,7 +1512,7 @@ test "Appender: appendListMap text" {
 }
 
 test "Appender: appendListMap date" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1542,7 +1537,7 @@ test "Appender: appendListMap date" {
 }
 
 test "Appender: appendListMap time" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1571,7 +1566,7 @@ test "Appender: appendListMap time" {
 }
 
 test "Appender: appendListMap timestamp" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1596,7 +1591,7 @@ test "Appender: appendListMap timestamp" {
 }
 
 test "Appender: appendListMap UUID" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -1643,7 +1638,7 @@ test "Appender: appendListMap UUID" {
 }
 
 test "Appender: incomplete row" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();

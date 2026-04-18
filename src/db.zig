@@ -5,15 +5,17 @@ const c = lib.c;
 const Conn = lib.Conn;
 const Pool = lib.Pool;
 
-const DuckDBError = c.DuckDBError;
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
+const DuckDBError = c.DuckDBError;
 const CONFIG_SIZEOF = c.config_sizeof;
 const CONFIG_ALIGNOF = c.config_alignof;
 const DB_SIZEOF = c.database_sizeof;
 const DB_ALIGNOF = c.database_alignof;
 
 pub const DB = struct {
+    io: Io,
     allocator: Allocator,
     db: *c.duckdb_database,
 
@@ -28,11 +30,11 @@ pub const DB = struct {
         };
     };
 
-    pub fn init(allocator: Allocator, path: anytype, db_config: Config) !DB {
-        return initWithErr(allocator, path, db_config, null);
+    pub fn init(io: Io, allocator: Allocator, path: anytype, db_config: Config) !DB {
+        return initWithErr(io, allocator, path, db_config, null);
     }
 
-    pub fn initWithErr(allocator: Allocator, path: anytype, db_config: Config, err: ?*?[]u8) !DB {
+    pub fn initWithErr(io: Io, allocator: Allocator, path: anytype, db_config: Config, err: ?*?[]u8) !DB {
         const str = try lib.stringZ(path, allocator);
         defer str.deinit(allocator);
 
@@ -67,7 +69,7 @@ pub const DB = struct {
             return error.OpenDB;
         }
 
-        return .{ .db = db, .allocator = allocator };
+        return .{ .io = io, .db = db, .allocator = allocator };
     }
 
     pub fn deinit(self: *const DB) void {
@@ -88,7 +90,7 @@ pub const DB = struct {
 const t = std.testing;
 test "DB: error" {
     var err: ?[]u8 = null;
-    try t.expectError(error.OpenDB, DB.initWithErr(t.allocator, "/tmp/does/not/exist/zuckdb", .{}, &err));
+    try t.expectError(error.OpenDB, DB.initWithErr(t.io, t.allocator, "/tmp/does/not/exist/zuckdb", .{}, &err));
     try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/does/not/exist/zuckdb\": No such file or directory", err.?);
     t.allocator.free(err.?);
 }

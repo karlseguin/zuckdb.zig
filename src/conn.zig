@@ -274,7 +274,7 @@ const CachedStmt = struct {
 
 const t = std.testing;
 test "conn: exec error" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -285,7 +285,7 @@ test "conn: exec error" {
 }
 
 test "conn: exec success" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -300,7 +300,7 @@ test "conn: exec success" {
 }
 
 test "conn: query error" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -311,7 +311,7 @@ test "conn: query error" {
 }
 
 test "conn: query select ok" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -326,7 +326,7 @@ test "conn: query select ok" {
 }
 
 test "conn: query empty" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -338,7 +338,7 @@ test "conn: query empty" {
 }
 
 test "conn: query mutate ok" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -361,7 +361,7 @@ test "conn: query mutate ok" {
 }
 
 test "conn: transaction" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -392,7 +392,7 @@ test "conn: transaction" {
 }
 
 test "conn: query with explicit state" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -407,7 +407,7 @@ test "conn: query with explicit state" {
 }
 
 test "conn: sql with different string types" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -437,7 +437,7 @@ test "conn: sql with different string types" {
 test "conn: constraint errors" {
     const zuckdb = @import("zuckdb.zig");
 
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -460,7 +460,7 @@ test "conn: constraint errors" {
 }
 
 test "conn: prepare error" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -471,7 +471,7 @@ test "conn: prepare error" {
 }
 
 test "conn: query cache" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -512,7 +512,7 @@ test "conn: query cache" {
 }
 
 test "conn: exec cache" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();

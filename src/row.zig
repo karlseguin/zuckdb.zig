@@ -380,7 +380,7 @@ const t = std.testing;
 // Test this specifically since there's special handling based on the length
 // of the column (inlined vs pointer)
 test "read varchar" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -439,7 +439,7 @@ test "read varchar" {
 // Test this specifically since there's special handling based on the length
 // of the column (inlined vs pointer)
 test "read blob" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -464,7 +464,7 @@ test "read blob" {
 }
 
 test "read ints" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -528,7 +528,7 @@ test "read ints" {
 }
 
 test "read bool" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -548,7 +548,7 @@ test "read bool" {
 }
 
 test "read float" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -569,7 +569,7 @@ test "read float" {
 }
 
 test "read decimal" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -590,7 +590,7 @@ test "read decimal" {
 }
 
 test "read date & time" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -608,7 +608,7 @@ test "read date & time" {
 }
 
 test "read list" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -689,7 +689,7 @@ test "read list" {
 
 // There's some internal caching with this, so we need to test mulitple rows
 test "read enum" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -730,7 +730,7 @@ test "read enum" {
 }
 
 test "owning row" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
