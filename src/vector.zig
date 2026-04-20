@@ -35,7 +35,7 @@ pub const Vector = struct {
         }
     }
 
-    pub fn writeType(self: *const Vector, writer: anytype) !void {
+    pub fn writeType(self: *const Vector, writer: *std.Io.Writer) !void {
         switch (self.type) {
             .list => |list| {
                 try list.child.writeType(writer, self.logical_type);
@@ -131,7 +131,7 @@ pub const Vector = struct {
                 }
             }
 
-            pub fn writeType(self: *const Vector.Type.Scalar, writer: anytype, logical_type: c.duckdb_logical_type) !void {
+            pub fn writeType(self: *const Vector.Type.Scalar, writer: *std.Io.Writer, logical_type: c.duckdb_logical_type) !void {
                 switch (self.*) {
                     .simple => |duckdb_type| {
                         if (duckdb_type == c.DUCKDB_TYPE_VARCHAR) {
@@ -146,7 +146,7 @@ pub const Vector = struct {
                         return writer.writeAll(@tagName(lib.DataType.fromDuckDBType(duckdb_type)));
                     },
                     .@"enum" => return writer.writeAll("enum"),
-                    .decimal => |d| return std.fmt.format(writer, "decimal({d},{d})", .{ d.width, d.scale }),
+                    .decimal => |d| return writer.print("decimal({d},{d})", .{ d.width, d.scale }),
                 }
             }
         };
@@ -333,7 +333,7 @@ fn listData(list: *Vector.Type.List, real_vector: c.duckdb_vector) Vector.List {
 const t = std.testing;
 const DB = lib.DB;
 test "Vector: write type" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -376,8 +376,8 @@ test "Vector: write type" {
     const rows = try conn.query("select * from all_types", .{});
     defer rows.deinit();
 
-    var arr: std.ArrayList(u8) = .empty;
-    defer arr.deinit(t.allocator);
+    var arr: std.Io.Writer.Allocating = .init(t.allocator);
+    defer arr.deinit();
 
     try expectTypeName(&arr, rows.vectors[0], "tinyint");
     try expectTypeName(&arr, rows.vectors[1], "smallint");
@@ -408,8 +408,8 @@ test "Vector: write type" {
     try expectTypeName(&arr, rows.vectors[26], "timestamptz");
 }
 
-fn expectTypeName(arr: *std.ArrayList(u8), vector: Vector, expected: []const u8) !void {
+fn expectTypeName(arr: *std.Io.Writer.Allocating, vector: Vector, expected: []const u8) !void {
     arr.clearRetainingCapacity();
-    try vector.writeType(arr.writer(t.allocator));
-    try t.expectEqualStrings(expected, arr.items);
+    try vector.writeType(&arr.writer);
+    try t.expectEqualStrings(expected, arr.written());
 }

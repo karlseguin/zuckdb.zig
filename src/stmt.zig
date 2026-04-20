@@ -291,7 +291,7 @@ fn bindError(comptime T: type) void {
 const t = std.testing;
 const DB = @import("db.zig").DB;
 test "bind: basic types" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -317,7 +317,7 @@ test "bind: basic types" {
 }
 
 test "bind: int" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -387,7 +387,7 @@ test "bind: int" {
 }
 
 test "bind: floats" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -408,7 +408,7 @@ test "bind: floats" {
 }
 
 test "bind: decimal" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -427,7 +427,7 @@ test "bind: decimal" {
 }
 
 test "bind: uuid" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -445,7 +445,7 @@ test "bind: uuid" {
 }
 
 test "bind: text" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -493,7 +493,7 @@ test "bind: text" {
 }
 
 test "bind: date/time" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -517,7 +517,7 @@ test "bind: date/time" {
 }
 
 test "bind: enum" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -535,7 +535,7 @@ test "bind: enum" {
 }
 
 test "bind: bistring" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -563,7 +563,7 @@ test "bind: bistring" {
 }
 
 test "bind: dynamic" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -585,7 +585,7 @@ test "bind: dynamic" {
 }
 
 test "query parameters" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -661,7 +661,7 @@ test "query parameters" {
 }
 
 test "Stmt: exec" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -694,7 +694,7 @@ test "Stmt: exec" {
 }
 
 test "Stmt: statementType" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();

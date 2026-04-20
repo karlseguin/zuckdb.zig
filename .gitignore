@@ -3,4 +3,3 @@ zig-out/
 .zig-cache/
 lib/libduckdb.dylib
 zig-pkg/
-

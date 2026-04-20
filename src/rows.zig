@@ -202,7 +202,7 @@ pub const Rows = struct {
 const t = std.testing;
 const DB = lib.DB;
 test "rows: introspect" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();
@@ -222,7 +222,7 @@ test "rows: introspect" {
 }
 
 test "rows: introspect empty" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     defer db.deinit();
 
     var conn = try db.conn();

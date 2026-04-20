@@ -6,6 +6,7 @@ const Conn = lib.Conn;
 const Rows = lib.Rows;
 const OwningRow = lib.OwningRow;
 
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 pub const Pool = struct {
@@ -14,8 +15,8 @@ pub const Pool = struct {
     conns: []*Conn,
     shutdown: bool,
     available: usize,
-    mutex: std.Thread.Mutex,
-    cond: std.Thread.Condition,
+    mutex: Io.Mutex,
+    cond: Io.Condition,
     allocator: Allocator,
 
     pub const Config = struct {
@@ -69,8 +70,8 @@ pub const Pool = struct {
 
         pool.* = .{
             .db = db,
-            .cond = .{},
-            .mutex = .{},
+            .cond = .init,
+            .mutex = .init,
             .conns = conns,
             .shutdown = false,
             .available = size,
@@ -82,23 +83,25 @@ pub const Pool = struct {
 
     // blocks until all connections can be safely removed from the pool
     pub fn deinit(self: *Pool) void {
+        const io = self.db.io;
         const conns = self.conns;
-        self.mutex.lock();
+
+        self.mutex.lockUncancelable(io);
         self.shutdown = true;
         // any thread blocked in acquire() will unblock, check self.shutdown
         // and return an error
-        self.cond.broadcast();
+        self.cond.broadcast(io);
 
         while (true) {
             if (self.available == conns.len) {
                 break;
             }
-            self.cond.wait(&self.mutex);
+            self.cond.waitUncancelable(io, &self.mutex);
         }
 
         // Don't need to lock this while we deallocate, as any calls to acquire
         // will see the shutdown = true;
-        self.mutex.unlock();
+        self.mutex.unlock(io);
 
         const allocator = self.allocator;
         for (conns) |conn| {
@@ -112,42 +115,64 @@ pub const Pool = struct {
     }
 
     pub fn acquire(self: *Pool) !*Conn {
+        const io = self.db.io;
         const conns = self.conns;
 
-        self.mutex.lock();
-        errdefer self.mutex.unlock();
+        const deadline = @as(i64, @intCast(self.timeout));
+        const start = std.Io.Timestamp.now(io, .awake);
+
+        const SelectResult = union(enum) { t: Io.Cancelable!void, c: Io.Cancelable!void };
+        var select_buf: [1]SelectResult = undefined;
+
+        try self.mutex.lock(io);
+        errdefer self.mutex.unlock(io);
+
         while (true) {
             if (self.shutdown) {
                 return error.PoolShuttingDown;
             }
             const available = self.available;
             if (available == 0) {
-                try self.cond.timedWait(&self.mutex, self.timeout);
+                const now = std.Io.Timestamp.now(io, .awake);
+                const elapsed = start.durationTo(now).toNanoseconds();
+                if (elapsed >= deadline) {
+                    return error.Timeout;
+                }
+                const remaining_ns = deadline - elapsed;
+
+                var select: Io.Select(SelectResult) = .init(io, &select_buf);
+                defer select.cancelDiscard();
+                try select.concurrent(.t, Io.sleep, .{ io, .fromNanoseconds(remaining_ns), .awake });
+                try select.concurrent(.c, Io.Condition.wait, .{ &self.cond, io, &self.mutex });
+
+                _ = try select.await();
                 continue;
             }
+
             const index = available - 1;
             const conn = conns[index];
             self.available = index;
-            self.mutex.unlock();
+            self.mutex.unlock(io);
 
             return conn;
         }
     }
 
     pub fn release(self: *Pool, conn: *Conn) void {
+        const io = self.db.io;
         var conns = self.conns;
         if (conn.err) |err| {
             conn.allocator.free(err);
             conn.err = null;
         }
 
-        self.mutex.lock();
+        self.mutex.lockUncancelable(io);
         const available = self.available;
         conns[available] = conn;
         self.available = available + 1;
-        self.mutex.unlock();
+        self.mutex.unlock(io);
 
-        self.cond.signal();
+        self.cond.signal(io);
     }
 
     pub fn exec(self: *Pool, sql: anytype, values: anytype) !usize {
@@ -197,7 +222,7 @@ pub const Pool = struct {
 
 const t = std.testing;
 test "Pool: thread-safety" {
-    const db = try DB.init(t.allocator, "/tmp/duckdb.zig.test", .{});
+    const db = try DB.init(t.io, t.allocator, "/tmp/duckdb.zig.test", .{});
     var pool = try db.pool(.{
         .size = 2,
         .on_first_connection = &testPoolFirstConnection,
@@ -220,7 +245,7 @@ test "Pool: thread-safety" {
 }
 
 test "Pool: exec/query/row" {
-    const db = try DB.init(t.allocator, ":memory:", .{});
+    const db = try DB.init(t.io, t.allocator, ":memory:", .{});
     var pool = try db.pool(.{ .size = 1 });
     defer pool.deinit();
 

@@ -1,6 +1,13 @@
 .{
     .name = .zuckdb,
-    .paths = .{""},
+    .paths = .{
+        "LICENSE",
+        "build.zig",
+        "build.zig.zon",
+        "lib",
+        "readme.md",
+        "src",
+    },
     .version = "0.0.0",
     .fingerprint = 0xe57532405497940e,
     .dependencies = .{
