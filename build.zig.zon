@@ -13,8 +13,8 @@
     .dependencies = .{
         .duckdb = .{
             .lazy = true,
-            .url = "https://github.com/duckdb/duckdb/releases/download/v1.4.3/libduckdb-src.zip",
-            .hash = "N-V-__8AAJh4kQF-o4g0XwMx2k0wOVRw-Z5UA67dtOSElzFb",
+            .url = "https://github.com/duckdb/duckdb/releases/download/v1.5.2/libduckdb-src.zip",
+            .hash = "N-V-__8AAP82qgEMw9wCzbQ-rD5uvO-o3X6PyzWA3zsoeIIS",
         },
     },
 }

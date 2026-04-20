@@ -739,7 +739,7 @@ test "owning row" {
     {
         // error case
         try t.expectError(error.DuckDBError, conn.row("select x", .{}));
-        try t.expectEqualStrings("Binder Error: Referenced column \"x\" not found in FROM clause!\n\nLINE 1: select x\n               ^", conn.err.?);
+        try t.expectEqualStrings("Binder Error: Referenced column \"x\" was not found because the FROM clause is missing\n\nLINE 1: select x\n               ^", conn.err.?);
     }
 
     {

@@ -1,9 +1,3 @@
-// in your build.zig, you can specify a custom test runner:
-// const tests = b.addTest(.{
-//    .root_module = $MODULE_BEING_TESTED,
-//    .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
-// });
-
 const std = @import("std");
 const Io = std.Io;
 const builtin = @import("builtin");

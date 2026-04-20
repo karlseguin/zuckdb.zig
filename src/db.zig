@@ -91,6 +91,7 @@ const t = std.testing;
 test "DB: error" {
     var err: ?[]u8 = null;
     try t.expectError(error.OpenDB, DB.initWithErr(t.io, t.allocator, "/tmp/does/not/exist/zuckdb", .{}, &err));
-    try t.expectEqualStrings("IO Error: Cannot open file \"/tmp/does/not/exist/zuckdb\": No such file or directory", err.?);
+    try t.expectEqual(true, std.mem.find(u8, err.?, "IO Error: Cannot open file") != null);
+    try t.expectEqual(true, std.mem.find(u8, err.?, "No such file or directory") != null);
     t.allocator.free(err.?);
 }
