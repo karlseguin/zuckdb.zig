@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) !void {
             const root_module = b.createModule(.{
                 .target = target,
                 .optimize = optimize,
+                .link_libcpp = true,
             });
 
             const c_lib = b.addLibrary(.{
@@ -32,18 +33,16 @@ pub fn build(b: *std.Build) !void {
                 .root_module = root_module,
             });
 
-            // c_lib.linkLibCpp();
-            // const lib_path = c_dep.path("");
-            // c_lib.addIncludePath(lib_path);
-            // c_lib.addCSourceFiles(.{
-            //     .files = &.{"duckdb.cpp"},
-            //     .root = c_dep.path(""),
-            //     .flags = &.{"-Wno-date-time"},
-            // });
+            root_module.addIncludePath(c_dep.path(""));
+            root_module.addCSourceFiles(.{
+                .files = &.{"duckdb.cpp"},
+                .root = c_dep.path(""),
+                .flags = &.{"-Wno-date-time"},
+            });
             if (debug_duckdb) {
-                c_lib.root_module.addCMacro("DUCKDB_DEBUG_STACKTRACE", "");
+                root_module.addCMacro("DUCKDB_DEBUG_STACKTRACE", "");
             }
-            c_lib.root_module.addCMacro("DUCKDB_STATIC_BUILD", "");
+            root_module.addCMacro("DUCKDB_STATIC_BUILD", "");
             // json tests fail because extension loading does not work
             // on the self built version. TODO: statically link core extensions:
             // c_lib.root_module.addCMacro("DUCKDB_EXTENSION_JSON_LINKED", "true");
