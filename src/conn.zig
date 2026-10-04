@@ -423,7 +423,7 @@ test "conn: sql with different string types" {
     }
 
     {
-        const sql = try t.allocator.dupeZ(u8, literal);
+        const sql = try t.allocator.dupeSentinel(u8, literal, 0);
         defer t.allocator.free(sql);
         try testSQLStringType(&conn, sql);
     }

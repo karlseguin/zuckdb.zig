@@ -204,11 +204,7 @@ fn bindValue(comptime T: type, stmt: c.duckdb_prepared_statement, value: anytype
         .pointer => |ptr| {
             switch (ptr.size) {
                 .slice => {
-                    if (ptr.is_const) {
-                        rc = bindSlice(stmt, bind_index, @as([]const ptr.child, value));
-                    } else {
-                        rc = bindSlice(stmt, bind_index, @as([]ptr.child, value));
-                    }
+                    rc = bindSlice(stmt, bind_index, @as([]const ptr.child, value));
                 },
                 .one => switch (@typeInfo(ptr.child)) {
                     .array => {

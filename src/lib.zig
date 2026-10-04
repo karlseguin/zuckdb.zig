@@ -132,7 +132,7 @@ pub fn encodeUUID(value: []const u8) !i128 {
 }
 
 const encoded_pos = [16]u8{ 0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34 };
-const hex_to_nibble = [_]u8{0xff} ** 48 ++ [_]u8{
+const hex_to_nibble = @as([48]u8, @splat(0xff)) ++ [_]u8{
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
@@ -140,7 +140,7 @@ const hex_to_nibble = [_]u8{0xff} ** 48 ++ [_]u8{
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0xff,
-} ++ [_]u8{0xff} ** 152;
+} ++ @as([152]u8, @splat(0xff));
 
 pub const StringZ = struct {
     z: [:0]const u8,
@@ -159,10 +159,10 @@ pub fn stringZ(str: anytype, allocator: Allocator) !StringZ {
         return .{ .duped = false, .z = str };
     }
     if (comptime isStringSlice(T)) {
-        return .{ .duped = true, .z = try allocator.dupeZ(u8, str) };
+        return .{ .duped = true, .z = try allocator.dupeSentinel(u8, str, 0) };
     }
     if (comptime isStringArray(T)) {
-        return .{ .duped = true, .z = try allocator.dupeZ(u8, &str) };
+        return .{ .duped = true, .z = try allocator.dupeSentinel(u8, &str, 0) };
     }
     @compileError("Expected a string, got: {}" ++ @typeName(T));
 }
